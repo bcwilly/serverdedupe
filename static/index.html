@@ -1,0 +1,1336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ServerDedupe</title>
+<style>
+:root{--bg:#0f1117;--panel:#171a23;--panel2:#1e2230;--line:#2a2f42;--text:#e6e8ef;--mute:#8b91a7;
+--accent:#6366f1;--accent2:#818cf8;--danger:#f43f5e;--ok:#34d399;--warn:#fbbf24}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+header{display:flex;align-items:center;gap:24px;padding:12px 20px;border-bottom:1px solid var(--line);background:var(--panel)}
+.top{position:sticky;top:0;z-index:5}
+#banner{background:var(--panel2);border-bottom:2px solid var(--accent);padding:10px 20px}
+#banner .in{max-width:1200px;margin:0 auto}
+#banner .top-row{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+#banner .top-row b{font-size:14px}
+#banner .bar{margin:8px 0 4px}
+#banner .cur{font-size:12px;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left}
+#banner .stats{display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:var(--mute)}
+#banner .stats b{color:var(--text);font-size:12px}
+.pulse{width:9px;height:9px;border-radius:50%;background:var(--accent2);animation:pulse 1.2s infinite}
+@keyframes pulse{50%{opacity:.25}}
+header h1{font-size:16px;margin:0;letter-spacing:.3px}
+header h1 span{color:var(--accent2)}
+nav{display:flex;gap:4px}
+nav button{background:none;border:0;color:var(--mute);padding:8px 14px;border-radius:8px;cursor:pointer;font:inherit}
+nav button.on{background:var(--panel2);color:var(--text)}
+main{max-width:1200px;margin:0 auto;padding:20px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+.card h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--mute);margin:0 0 12px;font-weight:600}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:860px){.grid{grid-template-columns:1fr}}
+label{display:block;font-size:12px;color:var(--mute);margin:10px 0 4px}
+input[type=text],input[type=number],select{width:100%;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit}
+input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.row{display:flex;gap:10px;align-items:center}
+.row>*{flex:1}
+button.btn{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 14px;cursor:pointer;font:inherit;white-space:nowrap}
+button.btn:hover{border-color:var(--accent2)}
+button.primary{background:var(--accent);border-color:var(--accent)}
+button.primary:hover{background:var(--accent2)}
+button.danger{background:var(--danger);border-color:var(--danger)}
+button.danger:hover{filter:brightness(1.1)}
+button.btn:disabled{opacity:.45;cursor:default}
+button.sm{padding:3px 9px;font-size:12px}
+.loc{display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg);border:1px solid var(--line);border-radius:8px;margin-bottom:6px}
+.loc .p{flex:1;word-break:break-all}
+.loc label{display:flex;align-items:center;gap:6px;margin:0;color:var(--text);white-space:nowrap}
+.empty{color:var(--mute);padding:14px;text-align:center}
+.bar{height:10px;background:var(--bg);border-radius:6px;overflow:hidden;margin:10px 0 6px}
+.bar>div{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));width:0;transition:width .3s}
+.mute{color:var(--mute)}.small{font-size:12px}
+.chips{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px}
+.chip{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 14px}
+.chip b{display:block;font-size:18px}
+.chip.sel b{color:var(--accent2)}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.toolbar select,.toolbar input{width:auto}
+.group{background:var(--panel);border:1px solid var(--line);border-radius:12px;margin-bottom:12px;overflow:hidden}
+.ghead{padding:8px 14px;background:var(--panel2);display:flex;gap:14px;align-items:center;font-size:12px;color:var(--mute)}
+.ghead b{color:var(--text)}
+.f{display:grid;grid-template-columns:28px 56px minmax(0,1fr) 90px 160px 170px;gap:10px;align-items:center;padding:8px 14px;border-top:1px solid var(--line)}
+.f.sel{background:rgba(244,63,94,.09)}
+.f .nm{overflow:hidden}
+.f .nm b{display:block;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.f .nm span{display:block;font-size:12px;color:var(--mute);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}
+.f img{width:48px;height:48px;object-fit:cover;border-radius:6px;background:var(--bg);cursor:zoom-in;display:block}
+.f .ph{width:48px;height:48px}
+.badge{font-size:11px;padding:1px 7px;border-radius:99px;border:1px solid var(--line);color:var(--mute)}
+.badge.prot{color:var(--ok);border-color:var(--ok)}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line)}
+th{color:var(--mute);font-weight:500;font-size:12px}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:20;padding:20px}
+.modal>div{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;max-width:640px;width:100%;max-height:85vh;overflow:auto}
+.modal.img>div{max-width:92vw;width:auto;padding:8px}
+.modal.img img{max-width:88vw;max-height:80vh;display:block}
+.dirs button{display:block;width:100%;text-align:left;background:none;border:0;color:var(--text);padding:7px 8px;border-radius:6px;cursor:pointer;font:inherit}
+.dirs button:hover{background:var(--panel2)}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--accent);padding:10px 18px;border-radius:10px;z-index:30;max-width:90vw}
+.errs{max-height:200px;overflow:auto;font-size:12px;color:var(--warn);white-space:pre-wrap;word-break:break-all}
+.hide{display:none!important}
+#mmenu{position:fixed;z-index:60;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 40px #000a;padding:8px;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);overflow:auto}
+#mmenu .cols{display:grid;grid-template-columns:1fr 1fr;gap:4px 14px}
+#mmenu h4{margin:4px 8px;font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.04em}
+#mmenu button{display:block;width:100%;text-align:left;background:none;border:0;color:var(--text);padding:6px 8px;border-radius:6px;font-size:13px;cursor:pointer}
+#mmenu button:hover{background:var(--panel2)}
+#mmenu hr{border:0;border-top:1px solid var(--line);margin:6px 0}
+#mmenu .ctx{padding:2px 8px 6px;font-size:12px;color:var(--mute);word-break:break-all}
+a.btn{display:inline-block;text-decoration:none;color:var(--text)}
+.f .nm b.link{cursor:pointer}.f .nm b.link:hover{color:var(--accent2);text-decoration:underline}
+.mono{font-family:ui-monospace,Consolas,monospace;font-size:12px;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;word-break:break-all;user-select:all;margin:4px 0 10px}
+.warnbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#3a2a12;border:1px solid var(--warn);border-radius:10px;padding:8px 12px;margin:8px 0;font-size:13px}
+.pill{font-size:11px;padding:1px 8px;border-radius:99px;border:1px solid var(--line)}
+.pill.ok{color:var(--ok);border-color:var(--ok)}.pill.bad{color:var(--danger);border-color:var(--danger)}.pill.warn{color:var(--warn);border-color:var(--warn)}
+td .sub{display:block;font-size:12px;color:var(--mute)}
+.actions{display:flex;gap:6px;flex-wrap:wrap}
+.tabs{display:flex;gap:6px;margin-bottom:6px}
+.tabs button{flex:1;background:var(--bg);border:1px solid var(--line);color:var(--mute);border-radius:10px;padding:10px 6px;cursor:pointer;font:inherit;text-align:center}
+.tabs button b{display:block;color:var(--text);font-weight:600}
+.tabs button span{font-size:11px}
+.tabs button.on{border-color:var(--accent);background:rgba(99,102,241,.14)}
+.tabs button.on span{color:var(--accent2)}
+.f .nm .meta{color:var(--accent2);direction:ltr;font-size:12px}
+.f .play{width:48px;height:48px;border-radius:8px;background:var(--bg);border:1px solid var(--line);color:var(--accent2);font-size:20px;cursor:pointer}
+.f .thumbwrap{position:relative;width:48px;height:48px}
+.f .thumbwrap i{position:absolute;inset:auto 2px 2px auto;font-style:normal;font-size:10px;background:rgba(0,0,0,.7);border-radius:4px;padding:0 4px}
+.viewer>div{max-width:96vw;width:auto;min-width:min(640px,92vw);max-height:97vh;padding:10px 14px;text-align:center;overflow:hidden}
+.viewer .vmedia{overflow:auto;max-height:calc(100vh - 270px);border-radius:6px;display:flex;justify-content:center}
+.viewer .vmedia.zoom{justify-content:flex-start;cursor:zoom-out}
+.viewer .vhead{display:flex;gap:10px;align-items:baseline;justify-content:space-between;margin-bottom:8px;text-align:left}
+.viewer .vname{font-weight:600;word-break:break-all}.viewer .vpath{font-size:12px;color:var(--mute);word-break:break-all}
+.viewer .vstate{padding:3px 12px;border-radius:99px;font-size:12px;border:1px solid var(--line);white-space:nowrap}
+.viewer .vstate.on{background:#4a1d2a;border-color:var(--danger);color:#ffb3c0}.viewer .vstate.prot{border-color:var(--ok);color:var(--ok)}
+.viewer .vbtns{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:10px}
+.viewer .vrow{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.viewer .vrow+.vrow{margin-top:6px}
+.viewer .vgrid{display:grid;gap:10px;overflow:auto;max-height:calc(100vh - 215px);padding:2px;text-align:left}
+.viewer .vtile{border:1px solid var(--line);border-radius:10px;padding:8px;background:var(--bg);display:flex;flex-direction:column;gap:5px;min-width:0}
+.viewer .vtile.on{border-color:var(--danger);background:#2a1219}
+.viewer .vtile.prot{border-color:var(--ok)}
+.viewer .vtile .vimg{height:var(--th,220px);display:flex;align-items:center;justify-content:center;cursor:zoom-in;position:relative}
+.viewer .vtile .vimg img{max-width:100%;max-height:100%;width:auto;height:auto;cursor:zoom-in}
+.viewer .vtile .num{position:absolute;top:4px;left:4px;background:rgba(0,0,0,.7);border-radius:6px;padding:1px 7px;font-size:12px;font-weight:700}
+.viewer .vtile .tn{font-weight:600;font-size:13px;word-break:break-all}
+.viewer .vtile .tp{font-size:11px;color:var(--mute);word-break:break-all;max-height:2.6em;overflow:hidden}
+.viewer .vtile .ti{font-size:12px}
+.viewer .vtile .tb{display:flex;gap:6px;margin-top:auto}
+.viewer .vtile .tb .btn{flex:1}
+.viewer .best{color:var(--ok);font-size:11px;margin-left:6px}
+.viewer .vhint{font-size:11px;color:var(--mute);margin-top:8px}
+.viewer img,.viewer video{max-width:92vw;max-height:calc(100vh - 270px);display:block;margin:0 auto;border-radius:6px;cursor:zoom-in;object-fit:contain}
+.viewer video{cursor:auto}
+.viewer .vmedia.zoom img{max-width:none;max-height:none;margin:0;cursor:zoom-out}
+.modal video,.modal audio{max-width:88vw;max-height:78vh;display:block}
+input[type=checkbox],input[type=range]{accent-color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="top">
+<header>
+  <h1>Server<span>Dedupe</span> <small id="ver" style="font-size:11px;font-weight:400;color:var(--mute)"></small></h1>
+  <nav id="nav"></nav>
+</header>
+<div id="banner" class="hide"></div>
+</div>
+<main id="main"></main>
+
+<script>
+"use strict";
+const $ = (s, r=document) => r.querySelector(s);
+function el(tag, props={}, ...kids){
+  const e = document.createElement(tag);
+  for (const [k,v] of Object.entries(props||{})){
+    if (k==='class') e.className=v; else if (k==='html') e.innerHTML=v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else if (v!==false && v!=null) e.setAttribute(k, v===true?'':v);
+  }
+  for (const k of kids.flat()) if (k!=null) e.append(k.nodeType?k:document.createTextNode(k));
+  return e;
+}
+async function api(url, body, method){
+  const o = {headers:{'Content-Type':'application/json'}};
+  if (body!==undefined){ o.method = method||'POST'; o.body = JSON.stringify(body); } else if (method) o.method = method;
+  busyUp();
+  try{
+    const r = await fetch(url, o);
+    const j = await r.json().catch(()=>({}));
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    return j;
+  } finally { busyDown(); }
+}
+// "Working…" strip: shows when a request takes more than a second, so a big scan on a slow NAS never looks frozen
+let _busy = 0, _busyTimer = null, _busyStart = 0;
+function busyUp(){
+  if(_busy++) return;
+  _busyStart = Date.now();
+  _busyTimer = setTimeout(() => {
+    let b = document.getElementById('working');
+    if(!b){ b = document.createElement('div'); b.id = 'working';
+      b.style.cssText = 'position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:80;background:#2a2f55;border:1px solid #6c6cff;color:#fff;padding:8px 16px;border-radius:10px;font-size:13px;box-shadow:0 6px 24px #0008';
+      document.body.append(b); }
+    const tick = () => { b.textContent = `⏳ Working… ${Math.round((Date.now()-_busyStart)/1000)}s (large scans take a while on the NAS)`; };
+    tick(); b._iv = setInterval(tick, 1000);
+  }, 1000);
+}
+function busyDown(){
+  if(--_busy) return;
+  clearTimeout(_busyTimer);
+  const b = document.getElementById('working'); if(b){ clearInterval(b._iv); b.remove(); }
+}
+const fmtSize = n => { if(n==null) return ''; const u=['B','KB','MB','GB','TB']; let i=0; while(n>=1024&&i<4){n/=1024;i++} return (i?n.toFixed(n<10?2:1):n)+' '+u[i]; };
+const fmtDate = t => new Date(t*1000).toLocaleString([], {dateStyle:'medium', timeStyle:'short'});
+function toast(msg, ms=4000){ const t=el('div',{class:'toast'},msg); document.body.append(t); setTimeout(()=>t.remove(), ms); }
+const store = { get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d }catch(e){ return d } },
+                set(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)) }catch(e){} } };
+
+const S = { cfg:null, tab:'scan', editJob:null, rootsBackup:null, roots:store.get('roots',[]), scanId:store.get('scanId',null), loaded:0, sum:null, poll:null };
+const TABS = [['scan','Scan'],['jobs','Schedule'],['results','Results'],['trash','Quarantine'],['history','History']];
+
+function renderNav(){
+  const n = $('#nav'); n.replaceChildren(...TABS.map(([k,l]) => el('button',{class:S.tab===k?'on':'',onclick:()=>go(k)},l)));
+}
+function go(tab){ S.tab=tab; S.refresh=null; renderNav(); ({scan:viewScan,jobs:viewJobs,results:viewResults,trash:viewTrash,history:viewHistory})[tab](); }
+
+/* ---------- folder picker ---------- */
+function pickFolder(title, cb, multi=false){
+  const body = el('div',{class:'dirs'});
+  const head = el('div',{class:'row',style:'margin-bottom:8px'});
+  const picked = new Set();
+  const sel = el('button',{class:'btn primary',style:'flex:none'}, multi ? 'Add this folder' : 'Use this folder');
+  const addTicked = multi ? el('button',{class:'btn primary',style:'flex:none'},'Add ticked folders') : null;
+  const allBtn = multi ? el('button',{class:'btn sm',style:'flex:none'},'Tick all') : null;
+  const m = el('div',{class:'modal'}, el('div',{}, el('h2',{style:'margin-top:0'},title), head, allBtn ? el('div',{style:'margin-bottom:6px'},allBtn) : '', body,
+      el('div',{class:'row',style:'margin-top:12px;justify-content:flex-end'}, el('button',{class:'btn',style:'flex:none',onclick:()=>m.remove()},'Cancel'), addTicked||'', sel)));
+  document.body.append(m);
+  let cur = null, curDirs = [];
+  async function load(p){
+    try{
+      const d = await api('/api/browse'+(p?'?path='+encodeURIComponent(p):''));
+      cur = d.path; curDirs = d.dirs.map(n => d.path+'/'+n);
+      head.replaceChildren(el('div',{class:'mute small',style:'word-break:break-all'},d.path),
+        d.parent ? el('button',{class:'btn sm',style:'flex:none',onclick:()=>load(d.parent)},'↑ Up') : '');
+      body.replaceChildren(...(d.dirs.length ? d.dirs.map(n => { const full = d.path+'/'+n;
+        return el('div',{style:'display:flex;align-items:center;gap:8px'},
+          multi ? el('input',{type:'checkbox',checked:picked.has(full),onchange:e=>e.target.checked?picked.add(full):picked.delete(full)}) : '',
+          el('button',{onclick:()=>load(full)},'📁 '+n)); }) : [el('div',{class:'empty'},'No sub-folders')]));
+    }catch(e){ toast(e.message) }
+  }
+  if(allBtn) allBtn.onclick = () => { curDirs.forEach(x=>picked.add(x)); body.querySelectorAll('input[type=checkbox]').forEach(c=>c.checked=true); };
+  if(addTicked) addTicked.onclick = () => { if(!picked.size) return toast('Tick some folders first'); m.remove(); cb([...picked]); };
+  sel.onclick = () => { if(cur){ m.remove(); cb(multi ? [cur] : cur); } };
+  load(null);
+}
+
+/* ---------- scan tab ---------- */
+const FAMILIES = [['regular','Regular','Any file type'],['photo','Photo','Pictures'],['video','Video','Movies & clips'],['audio','Audio','Music & recordings'],['folders','Empty folders','Tidy up'],['health','Health check','Find damaged files'],['large','Large files','Find the biggest']];
+const METHOD_LABELS = {
+  content:'Exact content (SHA-256) — identical files', name:'Same file name', name_size:'Same file name and size',
+  image:'Similar images (visual match — ignores size, format, resave)',
+  video_duration:'Same length (weak: many false matches — review carefully)',
+  video_similar:'Similar video (frame match — ignores resolution, format, bitrate)',
+  audio_tags:'Same artist + title tags', audio_tags_dur:'Same artist + title tags and similar length',
+  audio_fp:'Same recording (audio fingerprint — ignores tags, bitrate, format)',
+  empty:'Empty folders', video_health:'Videos — damaged, cut off or blank', large_files:'Biggest files (no matching)'};
+const FAMILY_HINT = {regular:'Scans every file type.', photo:'Only picture files (jpg, png, heic, raw …) unless you list extensions.',
+  video:'Only video files (mp4, mkv, mov, avi …) unless you list extensions.', audio:'Only audio files (mp3, flac, m4a, ogg, wav …) unless you list extensions.',
+  health:'Finds videos that are cut off, unreadable or have a long blank (black) stretch. Nothing is changed until you choose to. Photos will be added later.',
+  large:'Lists the biggest files in the folders you pick, biggest first, so you can see where the space went. Then remove, move or compress them (7z or zip). No duplicate matching.',
+  folders:'Finds folders with nothing in them (including folders that only hold other empty folders). Nothing is removed until you choose to.'};
+const FAMILY_MIN_KB = {regular:1, photo:10, video:1024, audio:100, folders:0, health:50, large:102400};
+const methodLabel = (fam, m) => fam==='large' ? 'Large files' : fam==='folders' ? 'Empty folders' : fam==='health' ? 'Health check: videos' : (fam && fam!=='regular' ? FAMILIES.find(x=>x[0]===fam)[1]+': ' : '') + (METHOD_LABELS[m]||m).split(' — ')[0].split(' (')[0];
+
+function viewScan(){
+  const m = $('#main');
+  const s = Object.assign({family:'regular',mode:'content',min_kb:1,max_mb:'',include_ext:'',exclude_ext:'',exclude_dirs:S.cfg.default_excludes,threshold:4,dur_tol:2,vthreshold:10,ber:30,include_album:false,flips:false,blank_secs:45,deep:false,health_mode:'quick',junk:true,auto_remove:false,top_n:500}, S.editJob ? S.editJob.params : store.get('settings',{}));
+  if(!S.cfg.methods[s.family] || !S.cfg.methods[s.family].includes(s.mode)){ s.family='regular'; s.mode='content'; }
+  const roots = el('div');
+  const draw = () => {
+    roots.replaceChildren(...(S.roots.length ? S.roots.map((r,i) => el('div',{class:'loc'},
+      el('div',{class:'p'},r.path),
+      el('label',{title:'Files here are never selected for removal. Use it for the copy you want to keep.'}, el('input',{type:'checkbox',checked:r.protected,onchange:e=>{r.protected=e.target.checked;store.set('roots',S.roots)}}),'Protected'),
+      el('button',{class:'btn sm',onclick:()=>{S.roots.splice(i,1);store.set('roots',S.roots);draw()}},'Remove'))) : [el('div',{class:'empty'},'No folders yet — add one to scan.')]));
+  };
+  draw();
+  const f = {};
+  const inp = (k,type='text',ph='') => (f[k] = el('input',{type,value:settingsVal(s,k),placeholder:ph}));
+  const tabs = el('div',{class:'tabs'});
+  const mode = el('select',{});
+  const hint = el('div',{class:'mute small',style:'margin-top:6px'});
+  const slider = (key,min,max,txt) => { const r = f[key] = el('input',{type:'range',min,max,value:s[key]}); const l = el('span',{class:'mute small'});
+    const upd = () => l.textContent = txt(r.value); r.oninput = upd; upd(); return el('div',{}, r, l); };
+  const num = (key,label) => el('div',{}, el('label',{},label), f[key] = el('input',{type:'number',min:0,max:60,step:0.5,value:s[key]}));
+  const imgBox = el('div',{}, el('label',{},'Image similarity'), slider('threshold',0,12,v=>`Strictness: ${v} (0 = near-identical, 12 = very loose)`));
+  const durBox = el('div',{}, num('dur_tol','Lengths may differ by up to (seconds)'));
+  const vidBox = el('div',{}, el('label',{},'Video similarity'), slider('vthreshold',0,24,v=>`Frame difference allowed: ${v} (lower = stricter)`));
+  const audBox = el('div',{}, el('label',{},'Audio similarity'), slider('ber',10,40,v=>`Fingerprint difference allowed: ${v}% (lower = stricter; different songs are ~47%)`));
+  f.include_album = el('input',{type:'checkbox',checked:s.include_album});
+  const albumBox = el('label',{style:'display:flex;gap:8px;align-items:center;color:var(--text)'}, f.include_album, 'Also require the same album');
+  f.flips = el('input',{type:'checkbox',checked:!!s.flips});
+  const flipTxt = el('span',{});
+  const flipBox = el('label',{style:'display:flex;gap:8px;align-items:center;color:var(--text)',title:'Slower: every photo or video is fingerprinted in extra orientations and compared against them.'}, f.flips, flipTxt);
+  f.blank_secs = el('input',{type:'number',min:5,max:600,step:5,value:s.blank_secs||45,style:'width:90px'});
+  f.deep = el('input',{type:'checkbox',checked:!!s.deep});
+  f.health_mode = el('select',{style:'width:auto'}, el('option',{value:'quick',selected:s.health_mode!=='full'},'Quick — start and last couple of minutes (fast)'), el('option',{value:'full',selected:s.health_mode==='full'},'Full — whole video (slower)'));
+  const healthHint = el('div',{class:'mute small',style:'margin:4px 0 8px'});
+  const healthSync = () => { healthHint.textContent = f.health_mode.value==='quick'
+    ? 'Finds cut-off files, unreadable files and blank endings. Where the problem begins is still worked out exactly. A blank stretch in the middle of a video is only noticed if it runs into the last couple of minutes.'
+    : 'Also finds blank stretches anywhere in the video, checking a frame about every '+Math.round(Math.max(10,Math.min(60,(+f.blank_secs.value||45)*0.75)))+' seconds. Roughly 8 times slower than Quick on long videos.'; };
+  f.health_mode.onchange = healthSync; f.blank_secs.oninput = healthSync; healthSync();
+  const healthBox = el('div',{},
+    el('label',{},'Check'), f.health_mode,
+    el('label',{},'Flag a video when a blank (black) or unreadable stretch lasts at least (seconds)'), f.blank_secs,
+    healthHint,
+    el('div',{class:'mute small',style:'margin:0 0 8px'},'Videos shorter than this are only flagged if they are almost entirely blank.'),
+    el('label',{style:'display:flex;gap:8px;align-items:center;color:var(--text)',title:'Reads and decodes every frame of every video. Can take many minutes per video on a NAS.'}, f.deep, 'Also decode every frame to find hidden errors — very slow'));
+  const warn = el('div',{class:'small',style:'color:var(--warn);margin-top:6px'});
+  f.junk = el('input',{type:'checkbox',checked:s.junk!==false});
+  f.auto_remove = el('input',{type:'checkbox',checked:!!s.auto_remove});
+  const folderBox = el('div',{},
+    el('label',{style:'display:flex;gap:8px;align-items:center;color:var(--text)'}, f.junk, 'Also treat folders holding only junk as empty (Thumbs.db, .DS_Store, desktop.ini, ._ files, Synology @eaDir)'),
+    el('label',{style:'display:flex;gap:8px;align-items:center;color:var(--text);margin-top:8px'}, f.auto_remove, 'Delete the empty folders automatically when the scan finishes'),
+    el('div',{class:'mute small',style:'margin:4px 0 10px'},'Best for a scheduled job. Folders are removed with rmdir, so one with anything real in it is never touched. They are deleted for good, not quarantined. The folders you add here are never removed themselves; protected folders are skipped.'));
+  f.top_n = el('input',{type:'number',min:10,max:5000,step:50,value:s.top_n||500,style:'width:110px'});
+  const largeBox = el('div',{}, el('label',{},'List the biggest … files'), f.top_n,
+    el('div',{class:'mute small',style:'margin:4px 0 8px'},'Only files at or above the “Min size” below are considered. The default is 100 MB (102400 KB); lower it to see smaller files too. Compressing and moving files can be done from the results.'));
+  const matchBox = el('div',{}, el('label',{},'Match by'), mode);
+  const fileBox = el('div',{},
+    el('div',{class:'row'}, el('div',{},el('label',{},'Min size (KB)'),inp('min_kb','number')), el('div',{},el('label',{},'Max size (MB, optional)'),inp('max_mb','number'))),
+    el('div',{class:'row'}, el('div',{},el('label',{},'Only these extensions'),inp('include_ext','text','e.g. pdf, docx, jpg')), el('div',{},el('label',{},'Skip these extensions'),inp('exclude_ext','text','e.g. odt, odp, tmp'))));
+  let family = s.family;
+  function setFamily(fam, resetDefaults){
+    family = fam;
+    [...tabs.children].forEach((b,i)=>b.classList.toggle('on', FAMILIES[i][0]===fam));
+    const cur = mode.value;
+    mode.replaceChildren(...S.cfg.methods[fam].map(v => el('option',{value:v},METHOD_LABELS[v])));
+    mode.value = S.cfg.methods[fam].includes(cur) ? cur : S.cfg.methods[fam][0];
+    hint.textContent = FAMILY_HINT[fam];
+    if(resetDefaults){
+      f.min_kb.value = FAMILY_MIN_KB[fam];
+      // "Drive" is Synology Drive's folder in each home: always skipped by the empty-folder tool, not by duplicate scans
+      const parts = f.exclude_dirs.value.split(',').map(x=>x.trim()).filter(Boolean).filter(x=>x!=='Drive');
+      if(fam==='folders') parts.push('Drive');
+      f.exclude_dirs.value = parts.join(',');
+    }
+    sync();
+  }
+  function sync(){
+    const v = mode.value;
+    const fo = family==='folders';
+    const ho = family==='health', lg = family==='large';
+    largeBox.classList.toggle('hide', !lg);
+    folderBox.classList.toggle('hide', !fo); matchBox.classList.toggle('hide', fo || ho || lg); fileBox.classList.toggle('hide', fo); healthBox.classList.toggle('hide', !ho);
+    imgBox.classList.toggle('hide', v!=='image');
+    durBox.classList.toggle('hide', !['video_duration','video_similar','audio_tags_dur','audio_fp'].includes(v));
+    vidBox.classList.toggle('hide', v!=='video_similar');
+    audBox.classList.toggle('hide', v!=='audio_fp');
+    flipBox.classList.toggle('hide', !['image','video_similar'].includes(v));
+    flipTxt.textContent = v==='image' ? 'Also match mirrored or sideways (90° rotated) copies — slower' : 'Also match mirrored copies — slower';
+    albumBox.classList.toggle('hide', !['audio_tags','audio_tags_dur'].includes(v));
+    const needs = ((family==='video'||family==='audio') && v!=='content') || family==='health';
+    warn.textContent = needs && !S.cfg.ffmpeg ? 'ffmpeg is not installed in this container — this method is unavailable.' :
+      family==='health' ? 'Quick mode checks only a handful of frames per video; Full mode checks the whole video. Results are cached, so later runs only check new or changed files, and a stopped scan carries on where it left off.' :
+      needs ? 'The first scan reads details from every file, which can be slow on a NAS (results are cached for next time).' : '';
+  }
+  FAMILIES.forEach(([k,l,d]) => tabs.append(el('button',{onclick:()=>setFamily(k,true)}, el('b',{},l), el('span',{},d))));
+  mode.onchange = sync;
+  const getBody = () => ({roots:S.roots, family, mode:mode.value, min_kb:f.min_kb.value||0, max_mb:f.max_mb.value, include_ext:f.include_ext.value,
+                  exclude_ext:f.exclude_ext.value, exclude_dirs:f.exclude_dirs.value, threshold:+f.threshold.value,
+                  dur_tol:+f.dur_tol.value, vthreshold:+f.vthreshold.value, ber:+f.ber.value, include_album:f.include_album.checked, flips:f.flips.checked, blank_secs:+f.blank_secs.value||45, health_mode:f.health_mode.value, top_n:+f.top_n.value||500, deep:family==='health' && f.deep.checked,
+                  junk:f.junk.checked, auto_remove:family==='folders' && f.auto_remove.checked});
+  async function startScan(){
+    const body = getBody();
+    store.set('settings', Object.assign({}, body, {roots:undefined}));
+    try{ await api('/api/scans', body); startPolling(); }catch(e){ toast(e.message) }
+  }
+  const start = el('button',{class:'btn primary',onclick:startScan},'Start scan now');
+  const saveJob = el('button',{class:'btn'+(S.editJob?' primary':''),onclick:()=>openJobModal(S.editJob, getBody())}, S.editJob ? 'Save changes…' : '⏰ Save as scheduled job…');
+  const cancelEdit = el('button',{class:'btn',onclick:()=>endEdit()},'Cancel');
+  const buttons = el('div',{style:'margin-top:14px;display:flex;gap:8px;flex-wrap:wrap'}, S.editJob ? [saveJob, cancelEdit] : [start, saveJob]);
+  m.replaceChildren(
+    S.editJob ? el('div',{class:'card',style:'border-color:var(--accent)'}, el('b',{},'Editing scheduled job “'+S.editJob.name+'”'), el('span',{class:'mute small'},'  Change the folders and settings below, then click Save changes.')) : '',
+    el('div',{class:'grid'},
+      el('div',{class:'card'}, el('h2',{},'Folders to scan'), roots,
+        el('button',{class:'btn',onclick:()=>pickFolder('Add folders to scan', ps => { ps.forEach(p => { if(!S.roots.find(r=>r.path===p)) S.roots.push({path:p,protected:false}); }); store.set('roots',S.roots); draw(); }, true)},'+ Add folders'),
+        el('p',{class:'mute small'},'Tick “Protected” on a folder you trust as the original. Its files are never selected for removal, and groups made only of protected files are hidden.')),
+      el('div',{class:'card'}, el('h2',{},'Scan type'), tabs, hint,
+        matchBox, imgBox, durBox, vidBox, flipBox, audBox, albumBox, healthBox, largeBox, warn, folderBox, fileBox,
+        el('label',{},'Skip folders named (comma-separated, wildcards OK)'), inp('exclude_dirs'),
+        buttons)),
+    );
+  setFamily(s.family, false); mode.value = s.mode; sync();
+}
+function settingsVal(s,k){ return s[k]==null ? '' : s[k]; }
+
+function fmtEta(sec){
+  if(!isFinite(sec) || sec<0) return '—';
+  sec = Math.round(sec); const h=Math.floor(sec/3600), m=Math.floor(sec%3600/60), x=sec%60;
+  return h ? `${h}h ${m}m` : m ? `${m}m ${x}s` : `${x}s`;
+}
+function updateBanner(r, now){
+  const b = $('#banner');
+  if(!r){ b.classList.add('hide'); b.replaceChildren(); return; }
+  b.classList.remove('hide');
+  const total = r.total||0, done = r.done||0, known = total>0;
+  const pct = known ? Math.min(100, done*100/total) : 0;
+  const elapsed = r.phase_start ? Math.max(0, now - r.phase_start) : 0;
+  const rate = elapsed>2 && done>0 ? done/elapsed : 0;               // items per second
+  const eta = known && rate && total>done ? (total-done)/rate : null;
+  const first = (r.params.roots||[]).map(x=>x.path.split('/').pop()).join(', ');
+  const stat = (k,v) => el('span',{}, k+' ', el('b',{},v));
+  b.replaceChildren(el('div',{class:'in'},
+    el('div',{class:'top-row'}, el('span',{class:'pulse'}), el('b',{}, 'Scan #'+r.id+' · '+(r.phase||'starting')),
+      el('span',{class:'mute small'}, (r.job_name?'⏰ '+r.job_name+' · ':'')+methodLabel(r.params.family, r.mode)+(first?' · '+first:'')),
+      el('span',{style:'flex:1'}),
+      el('button',{class:'btn sm',onclick:()=>api('/api/scans/'+r.id+'/cancel',{})},'Cancel scan')),
+    el('div',{class:'bar'}, el('div',{style:`width:${known?pct.toFixed(1):100}%;${known?'':'opacity:.25'}`})),
+    el('div',{class:'stats'},
+      known ? stat('Progress', `${done.toLocaleString()} of ${total.toLocaleString()} (${pct.toFixed(1)}%)`) : stat('Found so far', done.toLocaleString()),
+      known ? stat('Time left', eta==null ? 'calculating…' : '≈ '+fmtEta(eta)) : '',
+      rate ? stat('Speed', rate>=1 ? rate.toFixed(1)+' files/s' : (rate*60).toFixed(1)+' files/min') : '',
+      stat('This step', fmtEta(elapsed)+' elapsed')),
+    r.message ? el('div',{class:'cur',title:r.message}, '\u200E'+r.message) : ''));
+}
+async function pollOnce(){
+  const st = await api('/api/status').catch(()=>null);
+  if(!st) return true;
+  updateBanner(st.running, st.now);
+  return !!st.running;
+}
+function startPolling(){
+  if(S.poll) return;
+  pollOnce();
+  S.poll = setInterval(async () => {
+    const still = await pollOnce();
+    if(!still){
+      clearInterval(S.poll); S.poll=null;
+      const {scans} = await api('/api/scans');
+      const last = scans[0];
+      if(last){
+        if(last.status==='done'){ S.scanId=last.id; store.set('scanId',last.id); toast(last.params.family==='large' ? `Large files scan finished: the ${last.stats.groups} biggest files are listed` : last.params.family==='health' ? `Health check finished: ${last.stats.groups} damaged or suspect video${last.stats.groups===1?'':'s'} found in ${last.stats.files} checked` : last.params.family==='folders' ? `Scan finished: ${last.stats.groups} empty folders found`+(last.stats.removed?`, ${last.stats.removed} deleted automatically`:'') : `Scan finished: ${last.stats.groups} duplicate groups`, 6000); go('results'); }
+        else if(last.status==='error') toast('Scan failed: '+last.message, 10000);
+        else if(last.status==='cancelled') toast('Scan cancelled');
+        else if(last.status==='interrupted') toast('Scan was interrupted (the container restarted)', 8000);
+      }
+    }
+  }, 1000);
+}
+
+/* ---------- results tab ---------- */
+let pageQ = '', pageAll = false;
+async function viewResults(){
+  const m = $('#main');
+  if(!S.scanId){ m.replaceChildren(el('div',{class:'card empty'},'No scan yet. Run one from the Scan tab, or open one from History.')); return; }
+  let sc; try{ sc = await api('/api/scans/'+S.scanId); }catch(e){ S.scanId=null; return viewResults(); }
+  pageAll = false;
+  if(sc.params.family==='folders') return viewEmpties(sc);
+  if(sc.params.family==='health') return viewHealth(sc);
+  if(sc.params.family==='large') return viewLarge(sc);
+  const sumBox = el('div',{class:'chips'});
+  const warn = el('div',{id:'warn'});
+  const list = el('div',{id:'glist'});
+  const more = el('button',{class:'btn hide',onclick:()=>loadGroups(false)},'Load more');
+  const RULES = {newest:'Keep newest',oldest:'Keep oldest',shortest_path:'Keep shortest path',longest_path:'Keep longest path',shortest_name:'Keep shortest file name',
+    alpha:'Keep first alphabetically',largest:'Keep largest file',smallest:'Keep smallest file',resolution:'Keep highest resolution',longest:'Keep longest duration',
+    bitrate:'Keep highest bitrate',taken:'Keep earliest date taken',prefer_folder:'Keep copy in folder…'};
+  const RULE_SETS = {regular:['newest','oldest','largest','smallest','shortest_path','longest_path','shortest_name','alpha','prefer_folder'],
+    photo:['resolution','largest','taken','newest','oldest','shortest_path','longest_path','alpha','prefer_folder'],
+    video:['resolution','longest','bitrate','largest','newest','oldest','shortest_path','alpha','prefer_folder'],
+    audio:['bitrate','longest','largest','newest','oldest','shortest_path','alpha','prefer_folder']};
+  const rule = el('select',{}, (RULE_SETS[sc.params.family||'regular']||RULE_SETS.regular).map(v=>el('option',{value:v},RULES[v])));
+  let preferPath = '';
+  const preferBtn = el('button',{class:'btn hide',onclick:()=>pickFolder('Keep files in this folder', p=>{preferPath=p; preferBtn.textContent='📁 '+p;})},'Choose folder…');
+  rule.onchange = () => preferBtn.classList.toggle('hide', rule.value!=='prefer_folder');
+  const q = el('input',{type:'text',placeholder:'Filter by path…',value:pageQ,style:'width:200px'});
+  q.onkeydown = e => { if(e.key==='Enter'){ pageQ=q.value; loadGroups(true) } };
+
+  const txt = el('input',{type:'text',placeholder:'e.g. \\Backup or .tmp or copy of',style:'width:240px'});
+  async function textSel(mode){
+    if(!txt.value.trim()) return toast('Type some text to look for in the file path');
+    try{ S.sum = await api('/api/scans/'+S.scanId+'/select_text',{text:txt.value,mode}); drawSummary(); loadGroups(true,true); toast('Selection updated: '+S.sum.selected_files.toLocaleString()+' files selected'); }
+    catch(e){ toast(e.message) }
+  }
+  async function removeGroups(body, msg){
+    if(msg && !confirm(msg+'\n\nThis only removes them from this list. No files are touched.')) return;
+    try{ const r = await api('/api/scans/'+S.scanId+'/groups/remove', body); S.sum = r.summary; drawSummary(); loadGroups(true,true); toast(r.removed+' groups removed from the list'); }
+    catch(e){ toast(e.message) }
+  }
+  async function ignoreGroup(id){
+    try{ const r = await api('/api/scans/'+S.scanId+'/groups/ignore',{ids:[id]}); S.sum = r.summary; drawSummary(); loadGroups(true,true); toast('Ignored. It will not be shown again in any scan (History → Ignore list to undo).', 5000); }
+    catch(e){ toast(e.message) }
+  }
+  function removeFiltered(){
+    if(!pageQ.trim()) return toast('Type text in “Filter by path…” and press Enter first; then this removes every group that has a file matching it.', 7000);
+    removeGroups({q:pageQ}, `Remove every group with a file whose path contains “${pageQ}” from the list?`);
+  }
+  const mkBtn = (txt, cls, fn) => el('button',{class:'btn '+cls,onclick:fn},txt);
+  const actions = el('div',{class:'toolbar'},
+    mkBtn('Move to quarantine','danger',()=>doAct('trash')),
+    mkBtn('Replace with hardlinks','',()=>doAct('hardlink')),
+    mkBtn('Move to folder…','',()=>doAct('move')),
+    S.cfg.allow_permanent_delete ? mkBtn('Delete permanently','',()=>doAct('delete')) : null,
+    mkBtn('Check for deleted files','',()=>recheck(false)),
+    mkBtn('Export CSV','',()=>{ location.href='/api/scans/'+S.scanId+'/export.csv' }));
+
+  m.replaceChildren(
+    el('div',{class:'mute small',style:'margin-bottom:8px'}, `Scan #${sc.id} · ${methodLabel(sc.params.family, sc.mode)} · ${fmtDate(sc.started)} · ${sc.stats.files?.toLocaleString()} files looked at in ${sc.stats.seconds}s`
+        + (sc.stats.errors? ` · ${sc.stats.errors} unreadable` : '')
+        + (sc.stats.cache_hits? ` · ${sc.stats.cache_hits.toLocaleString()} reused from the cache` : '')),
+    sumBox, warn,
+    el('div',{class:'toolbar'}, el('b',{},'Auto-select:'), rule, preferBtn,
+      mkBtn('Apply','primary',async()=>{ try{ S.sum = await api('/api/scans/'+S.scanId+'/select',{rule:rule.value,prefer:preferPath?[preferPath]:[]}); drawSummary(); loadGroups(true,true); }catch(e){toast(e.message)} }),
+      mkBtn('Clear selection','',async()=>{ S.sum = await api('/api/scans/'+S.scanId+'/select',{rule:'clear'}); drawSummary(); loadGroups(true,true); }),
+      el('span',{style:'flex:1'}), q),
+    el('div',{class:'toolbar'}, el('b',{},'Select by text:'), txt,
+      mkBtn('Select matching files','',()=>textSel('select')),
+      mkBtn('Unselect matching','',()=>textSel('unselect')),
+      mkBtn('Select matching that have copies elsewhere','primary',()=>textSel('dup_elsewhere')),
+      mkBtn('Keep matching, select the rest','',()=>textSel('keep_matching')),
+      el('span',{style:'flex:1'}),
+      mkBtn('Remove listed groups…','',removeFiltered)),
+    actions, list, el('div',{style:'text-align:center;margin:16px'}, more));
+
+  function drawSummary(){
+    const s = S.sum; if(!s) return;
+    sumBox.replaceChildren(
+      el('div',{class:'chip'},el('b',{},s.groups.toLocaleString()),'duplicate groups'),
+      el('div',{class:'chip'},el('b',{},s.files.toLocaleString()),'files in groups'),
+      el('div',{class:'chip'},el('b',{},fmtSize(s.wasted)),'potentially reclaimable'),
+      el('div',{class:'chip sel'},el('b',{},s.selected_files.toLocaleString()+' · '+fmtSize(s.selected_bytes)),'selected'));
+    $('#more')?.remove();
+    const n = s.all_selected_groups || 0;
+    if(pageAll){
+      warn.replaceChildren(el('div',{class:'warnbar'}, el('b',{},'Showing only groups where every copy is ticked'),
+        el('span',{class:'mute'},' Untick at least one file in each group you want to keep a copy of.'), el('span',{style:'flex:1'}),
+        mkBtn('Keep one copy in each','primary',fixAll), mkBtn('Show all groups','',()=>{ pageAll=false; drawSummary(); loadGroups(true); })));
+    } else if(n){
+      warn.replaceChildren(el('div',{class:'warnbar'}, el('b',{},'⚠ '+n.toLocaleString()+' group'+(n>1?'s':'')+' have every copy ticked'),
+        el('span',{class:'mute'},' Removing them would leave no copy.'), el('span',{style:'flex:1'}),
+        mkBtn('Show these groups','primary',()=>{ pageAll=true; drawSummary(); loadGroups(true); }), mkBtn('Keep one copy in each','',fixAll)));
+    } else warn.replaceChildren();
+  }
+  async function fixAll(){
+    try{ const r = await api('/api/scans/'+S.scanId+'/fix_all_selected',{}); S.sum = r.summary; drawSummary(); loadGroups(true,true); toast('Unticked one copy in '+r.fixed.toLocaleString()+' groups'); }
+    catch(e){ toast(e.message) }
+  }
+  async function recheck(quiet){
+    try{
+      const r = await api('/api/scans/'+S.scanId+'/recheck',{});
+      S.sum = r.summary; drawSummary();
+      if(r.removed){ loadGroups(true,true); toast(r.removed.toLocaleString()+' file'+(r.removed>1?'s were':' was')+' deleted since this scan and '+(r.removed>1?'have':'has')+' been removed from the list', 5000); }
+      else if(!quiet) toast('All the listed files still exist');
+      return r.removed;
+    }catch(e){ if(!quiet) toast(e.message); return 0; }
+  }
+  async function refreshSummary(){ S.sum = await api('/api/scans/'+S.scanId+'/summary'); drawSummary(); }
+  S.refresh = () => { refreshSummary(); loadGroups(true,true); };
+
+  async function loadGroups(reset, keepCount){
+    const limit = 50;
+    let offset = reset ? 0 : S.loaded;
+    let lim = limit;
+    if(reset && keepCount && S.loaded>limit){ lim = Math.min(500, S.loaded); }
+    const d = await api(`/api/scans/${S.scanId}/groups?offset=${offset}&limit=${lim}&q=${encodeURIComponent(pageQ)}${pageAll?'&all_selected=1':''}`);
+    if(reset){ list.replaceChildren(); S.loaded=0; }
+    if(reset){ gdata.length = 0; for(const k in refs) delete refs[k]; }
+    S.match = d.match || S.match; d.groups.forEach(g => { gdata.push(g); list.append(groupCard(g)); });
+    S.loaded += d.groups.length;
+    more.classList.toggle('hide', d.groups.length < lim);
+    if(reset && !d.groups.length) list.append(el('div',{class:'card empty'}, pageAll ? 'No groups have every copy ticked now.' : pageQ ? 'No groups match that filter.' : 'No duplicates found 🎉'));
+  }
+
+  const gdata = [], refs = {};
+  function whyMatched(g){
+    const m = S.match || {}, md = m.mode, same = g && g.files.length>1 && g.files.every(x => x.size===g.files[0].size);
+    const T = {
+      content:['exact match','Identical contents: the checksums match, so these files are byte-for-byte the same.'],
+      name:['same name','Same file name (contents were not compared, so they may differ).'],
+      name_size:['same name + size','Same file name and the same size (contents were not compared).'],
+      image:['looks the same','Photos that look visually the same (strictness '+(m.threshold!=null?m.threshold:'?')+'). The files are not necessarily identical bytes'+(same?', though these happen to be the same size.':'; sizes can differ after a re-save or re-export.')+(g&&/mirrored/.test(g.label||'')?' At least one copy here is a mirrored or sideways version of another.':m.flips?' Mirrored and sideways copies were included in this scan.':'')],
+      video_duration:['same duration','Videos with the same duration (frames were not compared).'],
+      video_similar:['frames look alike','Videos whose sampled frames look alike (allowed difference '+(m.vthreshold!=null?m.vthreshold:'?')+').'+(g&&/mirrored/.test(g.label||'')?' At least one copy here is a mirrored version of another.':m.flips?' Mirrored copies were included in this scan.':'')],
+      audio_tags:['same tags','Same artist / title tags (audio itself was not compared).'],
+      audio_tags_dur:['same tags + length','Same artist / title tags and the same length.'],
+      audio_fp:['audio sounds alike','Audio fingerprints match (allowed difference '+(m.ber!=null?m.ber:'?')+'%).']
+    };
+    return T[md] || ['',''];
+  }
+  async function setMark(f, on){
+    S.sum = await api('/api/files/select',{ids:[f.id],selected:on});
+    f.selected = on; const r = refs[f.id]; if(r){ r.cb.checked = on; r.row.classList.toggle('sel', on); }
+    drawSummary();
+  }
+  async function keepOnly(g, keep){
+    S.sum = await api('/api/groups/keep',{keep_id:keep.id});
+    g.files.forEach(x => { x.selected = !(x.protected || x.id===keep.id || (keep.ikey && x.ikey===keep.ikey)); const r = refs[x.id]; if(r){ r.cb.checked = x.selected; r.row.classList.toggle('sel', x.selected); } });
+    drawSummary();
+  }
+  async function setGroupAll(g, on){
+    S.sum = await api('/api/groups/select',{file_id:g.files[0].id,selected:on});
+    g.files.forEach(x => { if(x.protected) return; x.selected = on; const r = refs[x.id]; if(r){ r.cb.checked = on; r.row.classList.toggle('sel', on); } });
+    drawSummary();
+  }
+  function openViewer(gid, fid){
+    let gi = gdata.findIndex(g => g.id===gid), fi = Math.max(0, gdata[gi].files.findIndex(x => x.id===fid));
+    document.getElementById('viewer')?.remove();
+    const m = el('div',{class:'modal img viewer',id:'viewer',onclick:e=>{ if(e.target===m) close(); }});
+    const box = el('div'); m.append(box); document.body.append(m);
+    const close = () => { document.removeEventListener('keydown', onKey); m.remove(); };
+    const cur = () => gdata[gi].files[fi]; let zoomed = false, cmp = false;
+    function drawCompare(){
+      const g = gdata[gi], n = g.files.length;
+      const free = g.files.filter(x => !x.protected), marked = free.filter(x => x.selected).length;
+      const all = free.length && marked===free.length;
+      const px = x => (x.meta && x.meta.w) ? x.meta.w*x.meta.h : 0, maxpx = Math.max(...g.files.map(px)), maxsz = Math.max(...g.files.map(x=>x.size)), maxbr = g.files[0].kind==='video' ? Math.max(...g.files.map(bitrateOf)) : 0;
+      const cols = Math.min(n, n<=4 ? n : n<=8 ? 4 : 5);
+      const grid = el('div',{class:'vgrid',style:`grid-template-columns:repeat(${cols},minmax(0,1fr));--th:${n<=3?'calc(100vh - 400px)':n<=8?'calc((100vh - 440px)/'+Math.ceil(n/cols)+' + 40px)':'150px'}`});
+      g.files.forEach((f,i) => {
+        const dir = f.path.slice(0, f.path.lastIndexOf('/'));
+        const st = f.protected ? 'protected (kept)' : f.selected ? '✔ marked for removal' : 'not marked';
+        const tile = el('div',{class:'vtile'+(f.selected?' on':'')+(f.protected?' prot':'')},
+          el('div',{class:'vimg',title:isPdf(f)?'':'Click to view this one on its own',onclick:()=>{ if(isPdf(f)) return; fi=i; cmp=false; draw(); }},
+            isPdf(f) ? pdfFrame(f,'var(--th)') : el('img',{src:'/api/thumb/'+f.id+'?s=900'}), el('span',{class:'num'}, String(i+1))),
+          el('div',{class:'tn'}, f.path.split('/').pop(), isPdf(f) ? el('a',{href:'#',class:'link',style:'margin-left:8px',onclick:e=>{e.preventDefault(); fi=i; cmp=false; draw();}},'view alone') : ''),
+          el('div',{class:'tp',title:f.path}, dir),
+          el('div',{class:'ti'}, fmtSize(f.size)+(f.meta&&f.meta.w?` · ${f.meta.w}×${f.meta.h}`:''), (maxpx && px(f)===maxpx && g.files.filter(x=>px(x)===maxpx).length===1) ? el('span',{class:'best'},'highest resolution') : ''),
+          techLine(f) ? el('div',{class:'ti',style:'color:var(--mute)'}, techLine(f), (f.kind==='img' && g.files.length>1 && f.size===maxsz && g.files.filter(x=>x.size===maxsz).length===1) ? el('span',{class:'best',title:'The biggest file. For the same picture that usually means less compression, but it can also be extra embedded data'},'largest file') : '', (maxbr && bitrateOf(f)===maxbr && g.files.filter(x=>bitrateOf(x)===maxbr).length===1 && g.files.length>1) ? el('span',{class:'best',title:'More data per second: usually fewer compression artifacts, but not necessarily more detail'},'highest bitrate') : '') : '',
+          el('div',{class:'small',style:'color:'+(f.selected?'#ffb3c0':f.protected?'var(--ok)':'var(--mute)')}, st),
+          el('div',{class:'tb'},
+            f.protected ? '' : el('button',{class:'btn primary',title:'Keep this one, mark all the others. Key: '+(i+1),onclick:()=>keepFile(f)},'Keep this'),
+            f.protected ? '' : el('button',{class:'btn',onclick:async()=>{ try{ await setMark(f,!f.selected); }catch(e){ return toast(e.message); } draw(); }}, f.selected?'Unmark':'Mark')));
+        grid.append(tile);
+      });
+      box.replaceChildren(
+        el('div',{class:'vhead'}, el('div',{}, el('div',{class:'vname'},`Group ${g.id} · compare all ${n} copies`), el('div',{class:'vpath'},`${marked} of ${free.length} marked`), el('div',{class:'small',style:'color:var(--ok);margin-top:2px'}, 'Matched because: '+whyMatched(g)[1])), ''),
+        grid,
+        all ? el('div',{class:'small',style:'color:var(--warn);margin-top:6px'},'⚠ Every copy in this group is marked: none would be left.') : '',
+        el('div',{class:'vrow',style:'margin-top:10px'},
+          el('button',{class:'btn danger',title:'Mark every copy, next group. Key: A',onclick:()=>selAll()},'Select all'),
+          el('button',{class:'btn',onclick:async()=>{ try{ await setGroupAll(g,false); }catch(e){ return toast(e.message); } draw(); }},'Clear'),
+          el('button',{class:'btn',title:'Key: C',onclick:()=>{ cmp=false; draw(); }},'Single view'),
+          el('button',{class:'btn',title:'Key: ↑',onclick:()=>jump(-1)},'▲ Previous group'),
+          el('button',{class:'btn',title:'Key: ↓',onclick:()=>jump(1)},'Next group ▼'),
+          el('button',{class:'btn',onclick:close},'Close')),
+        el('div',{class:'vhint'},'Keys: 1–'+Math.min(n,9)+' keep only that one · A select all · ↑ ↓ groups · C single view · Esc close'));
+    }
+    function draw(){
+      if(cmp) return drawCompare();
+      const g = gdata[gi], f = g.files[fi];
+      const free = g.files.filter(x => !x.protected), marked = free.filter(x => x.selected).length;
+      const all = free.length && marked===free.length;
+      const nm = el('div',{}, el('div',{class:'vname'}, f.path.split('/').pop()), el('div',{class:'vpath'}, f.path));
+      const state = f.protected ? el('span',{class:'vstate prot'},'protected (kept)') : el('span',{class:'vstate'+(f.selected?' on':'')}, f.selected?'✔ marked for removal':'not marked');
+      const media = isPdf(f) ? pdfFrame(f,'calc(100vh - 300px)') : f.kind==='video' ? el('video',{controls:true,preload:'none',poster:'/api/thumb/'+f.id+'?s=1200',src:'/api/raw/'+f.id}) : el('div',{class:'vmedia'+(zoomed?' zoom':''),onclick:()=>{zoomed=!zoomed;draw();}}, el('img',{src:'/api/thumb/'+f.id+'?s='+(zoomed?2400:1600),title:'Click or press Z to zoom'}));
+      const info = `Group ${g.id} · file ${fi+1} of ${g.files.length} · ${fmtSize(f.size)}` + (f.meta&&f.meta.w?` · ${f.meta.w}×${f.meta.h}`:'') + ` · ${marked} of ${free.length} marked in this group`;
+      const b = (t,c,fn,title) => el('button',{class:'btn '+c,title:title||'',onclick:fn},t);
+      box.replaceChildren(
+        el('div',{class:'vhead'}, nm, state), media,
+        el('div',{class:'mute small',style:'margin-top:8px'}, info),
+        techLine(f) ? el('div',{class:'mute small',style:'margin-top:2px'}, techLine(f)) : '',
+        el('div',{class:'small',style:'margin-top:3px;color:var(--ok)'}, 'Matched because: '+whyMatched(g)[1]),
+        all ? el('div',{class:'small',style:'color:var(--warn);margin-top:4px'},'⚠ Every copy in this group is marked: none would be left. Unmark one to keep it.') : '',
+        el('div',{class:'vbtns'},
+          el('div',{class:'vrow'},
+            f.protected ? '' : (f.selected ? b('Unmark','',()=>mark(false),'Key: U') : b('Mark & next','danger',()=>mark(true,true),'Mark this file for removal and go to the next file. Key: Space')),
+            f.protected ? '' : (f.selected ? '' : b('Mark','',()=>mark(true,false),'Mark this file for removal and stay here')),
+            f.protected ? '' : b('Keep only this','primary',()=>keep(),'Mark every other copy in this group, keep this one, go to the next group. Key: K'),
+            b('Select all','danger',()=>selAll(),'Mark every copy in this group and go to the next group. Key: A'),
+            b('Compare all','',()=>{ cmp=true; draw(); },'Show every copy in this group side by side. Key: C')),
+          el('div',{class:'vrow'},
+            b('◀ Previous','',()=>step(-1)),
+            b('Next ▶','',()=>step(1)),
+            b('Next group ▶▶','',()=>jump(1),'Key: ↓'),
+            b('Close','',close))),
+        el('div',{class:'vhint'},'Keys: ← → files in the group · ↑ ↓ groups · Space mark & next · K keep only this · A select all · C compare all · U unmark · Z or click image = zoom · Esc close'));
+    }
+    async function selAll(){
+      try{ await setGroupAll(gdata[gi], true); }catch(e){ return toast(e.message); }
+      toast('Group '+gdata[gi].id+': every copy marked'); jump(1);
+    }
+    async function keepFile(f){
+      if(f.protected) return;
+      try{ await keepOnly(gdata[gi], f); }catch(e){ return toast(e.message); }
+      jump(1);
+    }
+    async function keep(){
+      const f = cur(); if(f.protected) return;
+      try{ await keepOnly(gdata[gi], f); }catch(e){ return toast(e.message); }
+      jump(1);
+    }
+    async function mark(on, advance){
+      const f = cur(); if(f.protected) return;
+      try{ await setMark(f, on); }catch(e){ return toast(e.message); }
+      if(advance && on) step(1); else draw();
+    }
+    function step(d){
+      const n = gdata[gi].files.length;
+      if(fi+d >= n){ return jump(1); }
+      if(fi+d < 0){ return jump(-1, true); }
+      fi += d; zoomed=false; draw();
+    }
+    async function jump(d, toLast){
+      if(d>0 && gi+1>=gdata.length && !more.classList.contains('hide')){ try{ await loadGroups(false); }catch(e){} }
+      const ng = gi + d;
+      if(ng<0 || ng>=gdata.length){ toast(d>0 ? 'That was the last group' : 'That is the first group'); return draw(); }
+      gi = ng; fi = toLast ? gdata[gi].files.length-1 : 0; zoomed=false; draw();
+      refs[cur().id]?.row.scrollIntoView({block:'center'});
+    }
+    function onKey(e){
+      if(!document.getElementById('viewer') || e.target.tagName==='INPUT' && e.target.type==='text') return;
+      const k = e.key;
+      if(k==='Escape') close();
+      else if(cmp && [' ','Enter','ArrowLeft','ArrowRight','u','U','k','K'].includes(k)){ if(k===' ') e.preventDefault(); return; }
+      else if(k==='ArrowRight') step(1); else if(k==='ArrowLeft') step(-1);
+      else if(k==='ArrowDown') jump(1); else if(k==='ArrowUp') jump(-1);
+      else if(k===' ' || k==='Enter'){ e.preventDefault(); if(!cur().protected) mark(true,true); }
+      else if(k==='u' || k==='U') mark(false);
+      else if(k==='k' || k==='K') keep();
+      else if(k==='a' || k==='A') selAll();
+      else if(k==='c' || k==='C'){ cmp=!cmp; draw(); }
+      else if(cmp && /^[1-9]$/.test(k)){ const f = gdata[gi].files[+k-1]; if(f) keepFile(f); }
+      else if(k==='z' || k==='Z'){ zoomed=!zoomed; draw(); } else return;
+      e.preventDefault();
+    }
+    document.addEventListener('keydown', onKey);
+    draw();
+  }
+  function closeMenu(){ $('#mmenu')?.remove(); }
+  document.addEventListener('click', e => { if(!e.target.closest('#mmenu')) closeMenu(); });
+  async function ignoreFolder(f, folder){
+    closeMenu();
+    try{
+      const r = await api('/api/scans/'+S.scanId+'/ignore_folder',{file_id:f.id,folder});
+      S.sum = r.summary; drawSummary(); loadGroups(true,true);
+      toast('Ignoring '+r.folder+' from now on. History → Ignore list to undo.', 6000);
+    }catch(e){ toast(e.message) }
+  }
+  async function runMark(f, op, mark, folder){
+    closeMenu();
+    try{
+      const r = await api('/api/scans/'+S.scanId+'/mark',{file_id:f.id,op,mark,folder});
+      S.sum = r.summary; drawSummary(); loadGroups(true,true);
+      if(op==='invert') toast('Selection inverted');
+      else if(op.endsWith('protect_tree')) toast(r.changed.toLocaleString()+' files '+(op==='protect_tree'?'protected':'unprotected'));
+      else toast(r.changed.toLocaleString()+' files '+(mark?'marked':'unmarked'));
+    }catch(e){ toast(e.message) }
+  }
+  function markMenu(f, x, y){
+    closeMenu();
+    const dir = f.path.slice(0, f.path.lastIndexOf('/')), ext = (f.path.match(/\.[^./]+$/)||[''])[0] || 'no extension';
+    const drive = f.path.split('/').filter(Boolean).slice(1,2)[0] || 'this share';
+    const items = [['type','all files of type '+ext],['folder','all files in this folder'],['tree','all files in this folder and subfolders'],['drive','all files on “'+drive+'”'],
+      ['outside_folder','files outside this folder that have a copy inside it'],['outside_tree','files outside this folder tree that have a copy inside it'],
+      ['dup_folder','files in this folder that have copies elsewhere'],['dup_tree','files in this folder tree that have copies elsewhere']];
+    // the folder the rules work from: the file's own folder, or any folder above it
+    const parts = dir.split('/').filter(Boolean), levels = [];
+    for(let n = parts.length; n >= Math.min(2, parts.length); n--) levels.push('/'+parts.slice(0,n).join('/'));
+    let scope = dir;
+    const ctx = el('div',{class:'ctx',title:dir}, 'Folder: '+dir);
+    const pick = el('select',{title:'Choose which folder the rules below work from',onchange:()=>{ scope = pick.value; ctx.textContent = 'Folder: '+scope; ctx.title = scope; }},
+      ...levels.map((p,i) => el('option',{value:p}, (i===0 ? 'This file’s folder: ' : '↑ '+i+' level'+(i>1?'s':'')+' up: ')+(p.split('/').pop()))));
+    const col = (title, mark) => el('div',{}, el('h4',{},title), ...items.map(([op,t]) => el('button',{onclick:()=>runMark(f,op,mark,op==='type'||op==='drive'?undefined:scope)}, (mark?'Mark ':'Unmark ')+t)));
+    const m = el('div',{id:'mmenu'},
+      el('label',{style:'margin:0 0 3px'},'Work from folder:'), pick, ctx,
+      el('div',{class:'cols'}, col('Mark',true), col('Unmark',false)),
+      el('hr'),
+      el('button',{onclick:async()=>{ closeMenu(); S.sum=await api('/api/scans/'+S.scanId+'/select',{rule:'clear'}); drawSummary(); loadGroups(true,true); }},'Unmark all'),
+      el('button',{onclick:()=>runMark(f,'invert')},'Invert marked files'),
+      el('hr'),
+      el('button',{onclick:()=>ignoreFolder(f,scope)},'Ignore the chosen folder from now on (skipped by all duplicate and health scans)'),
+      el('button',{onclick:()=>runMark(f,'protect_tree',undefined,scope)},'Protect the chosen folder tree (never marked, keeps its files)'),
+      el('button',{onclick:()=>runMark(f,'unprotect_tree',undefined,scope)},'Unprotect the chosen folder tree'));
+    document.body.append(m);
+    const w = m.offsetWidth, h = m.offsetHeight;
+    m.style.left = Math.max(8, Math.min(x, innerWidth - w - 8))+'px';
+    m.style.top = Math.max(8, Math.min(y, innerHeight - h - 8))+'px';
+  }
+
+  function groupCard(g){
+    const card = el('div',{class:'group'});
+    card.append(el('div',{class:'ghead'}, el('b',{},'Group '+g.id), el('span',{},g.files.length+' files'), el('span',{},'reclaimable '+fmtSize(g.wasted)), (whyMatched(g)[0] ? el('span',{title:whyMatched(g)[1],style:'color:var(--ok)'},'● '+whyMatched(g)[0]) : ''), g.label? el('span',{},g.label):'',
+      el('span',{style:'flex:1'}),
+      el('button',{class:'btn sm',title:'Tick every copy in this group',onclick:async()=>{ S.sum=await api('/api/groups/select',{file_id:g.files[0].id,selected:true}); drawSummary(); loadGroups(true,true); }},'Select all'),
+      el('button',{class:'btn sm',onclick:async()=>{ S.sum=await api('/api/groups/select',{file_id:g.files[0].id,selected:false}); drawSummary(); loadGroups(true,true); }},'Clear'),
+      el('button',{class:'btn sm',title:'Never show this group again, in any future scan (manage under History → Ignore list)',onclick:()=>ignoreGroup(g.id)},'Ignore'),
+      el('button',{class:'btn sm',title:'Hide this group from the list (files are not touched)',onclick:()=>removeGroups({ids:[g.id]})},'Remove group')));
+    g.files.forEach(f => {
+      const cb = el('input',{type:'checkbox',checked:f.selected,disabled:f.protected});
+      const row = el('div',{class:'f'+(f.selected?' sel':''),oncontextmenu:e=>{ e.preventDefault(); e.stopPropagation(); markMenu(f,e.clientX,e.clientY); }},
+        cb,
+        f.kind==='img' ? el('img',{src:'/api/thumb/'+f.id,loading:'lazy',title:'Click to view, mark and step through this group',onclick:()=>openViewer(g.id,f.id)})
+          : f.kind==='video' ? el('div',{class:'thumbwrap'}, el('img',{src:'/api/thumb/'+f.id,loading:'lazy',title:'Click to view, mark and step through this group',onclick:()=>openViewer(g.id,f.id)}), el('i',{},'▶'))
+          : f.kind==='audio' ? el('button',{class:'play',title:'Play',onclick:()=>showPlayer('audio',f.id)},'♪') : isPdf(f) ? el('button',{class:'btn sm',title:'Open and compare the PDFs in this group',onclick:()=>openViewer(g.id,f.id)},'View PDF') : el('div',{class:'ph'}),
+        el('div',{class:'nm',title:f.path}, el('b',{class:'link',title:'Click to open this file',onclick:()=>showFile(f)},f.path.split('/').pop()), el('span',{}, '‎'+f.path.slice(0,f.path.lastIndexOf('/'))), metaLine(f)),
+        el('div',{}, fmtSize(f.size)),
+        el('div',{class:'mute'}, fmtDate(f.mtime)),
+        el('div',{style:'display:flex;gap:6px;justify-content:flex-end'}, f.protected?el('span',{class:'badge prot'},'protected'):'' ,
+           g.files.some(o=>o.id!==f.id && o.ikey===f.ikey)? el('span',{class:'badge',title:'Already a hardlink of another file here — no extra space used'},'hardlink'):'',
+           el('button',{class:'btn sm',title:'Mark / unmark tools (or right-click the row)',onclick:e=>{ e.stopPropagation(); const r=e.target.getBoundingClientRect(); markMenu(f,r.left-300,r.bottom+4); }},'⋯'),
+           f.protected?'':el('button',{class:'btn sm',title:'Select every other copy in this group',onclick:async()=>{ S.sum=await api('/api/groups/keep',{keep_id:f.id}); drawSummary(); loadGroups(true,true); }},'Keep only this')));
+      cb.onchange = async () => { row.classList.toggle('sel',cb.checked); S.sum = await api('/api/files/select',{ids:[f.id],selected:cb.checked}); drawSummary(); };
+      refs[f.id] = {cb,row,f};
+      card.append(row);
+    });
+    return card;
+  }
+
+  async function doAct(action){
+    if(!S.sum || !S.sum.selected_files){ toast('Nothing selected'); return; }
+    const n = `${S.sum.selected_files.toLocaleString()} files (${fmtSize(S.sum.selected_bytes)})`;
+    const allG = S.sum.all_selected_groups || 0;
+    let allowAll = false;
+    if(allG && action==='move') allowAll = true;   // moving keeps every file, so no typed confirmation
+    else if(allG && action!=='hardlink'){
+      const c = await choose(`${allG.toLocaleString()} group${allG>1?'s have':' has'} every copy ticked`,
+        `Going ahead would remove ALL copies of those files${action==='trash'?' (you could still restore them from Quarantine)':''}. What would you like to do?`,
+        [['show','Show me these groups','primary'],['fix','Keep one copy in each'],['all','Remove all copies anyway','danger'],['no','Cancel']]);
+      if(c==='show'){ pageAll=true; drawSummary(); loadGroups(true); return; }
+      if(c==='fix'){ await fixAll(); return; }
+      if(c!=='all') return;
+      if(prompt('Type REMOVE ALL to include them.')!=='REMOVE ALL') return;
+      allowAll = true;
+    }
+    const doIt = async dest => {
+      try{
+        const r = await api('/api/scans/'+S.scanId+'/act',{action,dest,allow_all:allowAll});
+        S.sum = r.summary; drawSummary(); loadGroups(true,true);
+        toast(`${r.done} done (${fmtSize(r.bytes)}), ${r.skipped} skipped`, 6000);
+        if(r.errors.length) showErrors(r.errors);
+      }catch(e){ toast(e.message, 8000) }
+    };
+    if(action==='trash'){ if(confirm(`Move ${n} to the quarantine folder?\nYou can restore them from the Quarantine tab.`)) doIt(); }
+    else if(action==='hardlink'){ if(confirm(`Replace ${n} with hardlinks to a kept copy?\nSpace is reclaimed, and the files stay visible in every folder. Only works within one shared folder.`)) doIt(); }
+    else if(action==='move'){ pickFolder('Move selected files to…', p => { if(confirm(`Move ${n} to\n${p}?`)) doIt(p); }); }
+    else if(action==='delete'){ if(prompt(`PERMANENTLY delete ${n}? This cannot be undone.\nType DELETE to confirm.`)==='DELETE') doIt(); }
+  }
+
+  await refreshSummary();
+  await loadGroups(true);
+  recheck(true);   // reports are a snapshot: in the background, drop files deleted since the scan (refreshes the list if any are gone)
+}
+async function viewEmpties(sc){
+  const m = $('#main'); let q = '', loaded = 0, sum = null;
+  const chips = el('div',{class:'chips'}), list = el('div',{class:'card',style:'padding:0'});
+  const more = el('button',{class:'btn hide',onclick:()=>load(false)},'Load more');
+  const filter = el('input',{type:'text',placeholder:'Filter by path…',style:'width:220px'});
+  filter.onkeydown = e => { if(e.key==='Enter'){ q=filter.value; load(true); } };
+  const mk = (t,c,fn) => el('button',{class:'btn '+c,onclick:fn},t);
+  function draw(){
+    if(!sum) return;
+    chips.replaceChildren(el('div',{class:'chip'},el('b',{},sum.listed.toLocaleString()),'empty folders'),
+      el('div',{class:'chip sel'},el('b',{},sum.selected.toLocaleString()),'selected'),
+      sum.removed ? el('div',{class:'chip'},el('b',{},sum.removed.toLocaleString()),'removed') : '');
+  }
+  async function bulk(selected){ try{ sum = (await api('/api/scans/'+sc.id+'/empties/select',{selected,q})).summary; draw(); load(true); }catch(e){ toast(e.message) } }
+  async function removeSel(){
+    if(!sum || !sum.selected) return toast('Nothing selected');
+    if(!confirm(`Delete ${sum.selected.toLocaleString()} empty folders?\nA folder that has anything in it by now is skipped. Deleted folders do not go to the quarantine.`)) return;
+    try{
+      const r = await api('/api/scans/'+sc.id+'/empties/remove',{}); sum = r.summary; draw(); load(true);
+      toast(`${r.done} folders removed, ${r.skipped} skipped`, 6000); if(r.errors.length) showErrors(r.errors);
+    }catch(e){ toast(e.message, 8000) }
+  }
+  async function load(reset){
+    if(reset){ loaded = 0; list.replaceChildren(); }
+    const d = await api(`/api/scans/${sc.id}/empties?offset=${loaded}&limit=200&q=${encodeURIComponent(q)}`);
+    sum = d.summary; draw();
+    d.folders.forEach(f => {
+      const cb = el('input',{type:'checkbox',checked:f.selected});
+      cb.onchange = async () => { sum = (await api('/api/scans/'+sc.id+'/empties/select',{ids:[f.id],selected:cb.checked})).summary; draw(); };
+      const i = f.path.lastIndexOf('/');
+      list.append(el('div',{class:'f',style:'grid-template-columns:28px 1fr auto'}, cb,
+        el('div',{class:'nm',title:'This folder will be deleted: '+f.path,style:'white-space:normal;word-break:break-all'},
+          el('span',{style:'display:inline;color:var(--mute)'}, f.path.slice(0,i+1)), el('b',{class:'link',title:'Click to look inside this folder',style:'color:var(--danger);display:inline',onclick:()=>showEmpty(f)}, f.path.slice(i+1))),
+        el('div',{style:'display:flex;gap:6px;align-items:center'},
+          f.junk ? el('span',{class:'badge',title:'Only junk files inside (Thumbs.db, .DS_Store, @eaDir …). They are deleted with the folder.'},'junk only') : '',
+          el('button',{class:'btn sm',title:'Keep this folder: never list or delete it again, in any scan (History → Ignore list to undo)',onclick:async()=>{
+            try{ const r = await api('/api/scans/'+sc.id+'/empties/ignore',{ids:[f.id]}); sum = r.summary; draw(); load(true); toast('Ignored. This folder is kept in every future scan.', 5000); }catch(e){ toast(e.message) } }},'Ignore'))));
+    });
+    loaded += d.folders.length;
+    more.classList.toggle('hide', d.folders.length < 200);
+    if(reset && !d.folders.length) list.append(el('div',{class:'empty'}, q ? 'No empty folders match that filter.' : (sum.removed ? 'All empty folders have been removed 🎉' : 'No empty folders found 🎉')));
+  }
+  m.replaceChildren(
+    el('div',{class:'mute small',style:'margin-bottom:8px'}, `Scan #${sc.id} · Empty folders · ${fmtDate(sc.started)} · ${sc.stats.files?.toLocaleString()} folders looked at in ${sc.stats.seconds}s`
+      + (sc.params.junk ? ' · junk-only folders counted as empty' : '')),
+    chips,
+    el('div',{class:'toolbar'}, mk('Select all','primary',()=>bulk(true)), mk('Clear selection','',()=>bulk(false)),
+      el('span',{class:'mute small'},'(applies to the filtered list when a filter is set)'), el('span',{style:'flex:1'}), filter),
+    el('div',{class:'toolbar'}, mk('Delete selected empty folders','danger',removeSel),
+      el('span',{class:'mute small'},'Only the folder shown in red at the end of each path is deleted, never the folders above it. Choosing a folder also removes the empty folders inside it.')),
+    list, el('div',{style:'text-align:center;margin:16px'}, more));
+  await load(true);
+}
+async function viewHealth(sc){
+  const m = $('#main'); let q = '', kind = '', loaded = 0, sum = null;
+  const chips = el('div',{class:'chips'}), list = el('div',{class:'card',style:'padding:0'});
+  const more = el('button',{class:'btn hide',onclick:()=>load(false)},'Load more');
+  const filter = el('input',{type:'text',placeholder:'Filter by path…',style:'width:220px'});
+  filter.onkeydown = e => { if(e.key==='Enter'){ q=filter.value; load(true); } };
+  const KIND = {truncated:'Cut off', unreadable:'Unreadable', damaged_mid:'Damaged in the middle', blank_end:'Blank at the end', blank_mid:'Blank in the middle',
+                novideo:'No video', noduration:'No length', tiny:'Too small', decode_errors:'Decode errors'};
+  const kindSel = el('select',{style:'width:auto',onchange:()=>{ kind = kindSel.value; load(true); }});
+  const mk = (t,c,fn) => el('button',{class:'btn '+c,onclick:fn},t);
+  S.refresh = () => load(true);
+  function draw(){
+    if(!sum) return;
+    chips.replaceChildren(el('div',{class:'chip'},el('b',{},sum.listed.toLocaleString()),'suspect videos'),
+      el('div',{class:'chip'},el('b',{},fmtSize(sum.bytes)),'in those files'),
+      el('div',{class:'chip sel'},el('b',{},sum.selected.toLocaleString()+' · '+fmtSize(sum.selected_bytes)),'selected'),
+      sum.handled ? el('div',{class:'chip'},el('b',{},sum.handled.toLocaleString()),'moved / quarantined') : '');
+    const cur = kindSel.value;
+    kindSel.replaceChildren(el('option',{value:''},'All problems'), ...Object.entries(sum.kinds).map(([k,n]) => el('option',{value:k,selected:k===cur},`${KIND[k]||k} (${n})`)));
+  }
+  async function bulk(selected){ try{ sum = (await api('/api/scans/'+sc.id+'/health/select',{selected,q,kind})).summary; draw(); load(true); }catch(e){ toast(e.message) } }
+  async function act(action){
+    if(!sum || !sum.selected) return toast('Nothing selected');
+    const run = async dest => {
+      try{
+        const r = await api('/api/scans/'+sc.id+'/health/act',{action,dest}); sum = r.summary; draw(); load(true);
+        toast(`${r.done} ${action==='trash'?'sent to quarantine':'moved'}, ${r.skipped} skipped`, 6000); if(r.errors.length) showErrors(r.errors);
+      }catch(e){ toast(e.message, 8000) }
+    };
+    if(action==='trash'){ if(confirm(`Move ${sum.selected.toLocaleString()} videos (${fmtSize(sum.selected_bytes)}) to the quarantine?\nThey can be restored from the Quarantine tab until you purge them.`)) run(); }
+    else pickFolder('Move selected videos to…', p => { if(confirm(`Move ${sum.selected.toLocaleString()} videos to\n${p}?`)) run(p); });
+  }
+  async function frames(f){
+    const d = f.detail || {}, start = d.start||0, dur = d.dur||0;
+    const pic = (label, t) => { const img = el('img',{src:`/api/health/${f.id}/frame?t=${Math.max(0,t).toFixed(1)}`,style:'width:100%;border-radius:6px;background:#000;min-height:90px',alt:'no picture could be read here'});
+      img.onerror = () => { img.replaceWith(el('div',{style:'background:#000;color:#999;border-radius:6px;padding:34px 8px;text-align:center'},'No picture can be read here')); };
+      return el('div',{style:'flex:1;min-width:200px'}, img, el('div',{class:'mute small',style:'margin-top:4px;text-align:center'}, `${label} · ${fmtDur(Math.max(0,t))}`)); };
+    const bad = d.end && d.end>start ? start + Math.min(5, (d.end-start)/2) : start;
+    const copies = el('div',{class:'small',style:'margin-top:10px'}, 'Looking for other copies…');
+    const m2 = el('div',{class:'modal',onclick:e=>{ if(e.target===m2) m2.remove(); }});
+    m2.append(el('div',{style:'max-width:760px'},
+      el('h3',{style:'margin-top:0;word-break:break-all'}, f.path.split('/').pop()),
+      el('div',{class:'small',style:'color:var(--warn);margin-bottom:8px'}, f.reason),
+      el('div',{style:'display:flex;gap:10px;flex-wrap:wrap'}, pic('Last good picture', start>0 ? start-2 : 0), pic('Inside the problem', bad), dur ? pic('Very end', dur-1) : ''),
+      copies,
+      el('div',{class:'actions',style:'justify-content:flex-end;margin-top:10px'},
+        f.fid ? el('button',{class:'btn',onclick:()=>showPlayer('video', f.fid)},'▶ Play') : '',
+        f.fid ? el('button',{class:'btn',onclick:()=>showFile({id:f.fid})},'File details') : '',
+        el('button',{class:'btn',onclick:()=>m2.remove()},'Close'))));
+    document.body.append(m2);
+    try{
+      const c = await api(`/api/health/${f.id}/copies`);
+      if(!c.found) copies.textContent = 'No duplicate scan has seen this file, so it is not known whether another copy exists. Run an exact or similar-video scan to find out.';
+      else if(!c.copies.length) copies.textContent = 'The last duplicate scan found no other copies.';
+      else { const ICON = {healthy:'✅ looks healthy', damaged:'❌ also damaged', unchecked:'❔ not checked by this scan', gone:'— no longer there'};
+        copies.replaceChildren(el('b',{},'Other copies (from duplicate scan #'+c.scan+'):'), ...c.copies.map(x => el('div',{style:'margin-top:3px;word-break:break-all'}, (ICON[x.status]||x.status)+' · '+x.path+' · '+fmtSize(x.size)+(x.reason?' · '+x.reason:'')))); }
+    }catch(e){ copies.textContent = ''; }
+  }
+  async function load(reset){
+    if(reset){ loaded = 0; list.replaceChildren(); }
+    const d = await api(`/api/scans/${sc.id}/health?offset=${loaded}&limit=100&q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}`);
+    sum = d.summary; draw();
+    d.files.forEach(f => {
+      const cb = el('input',{type:'checkbox',checked:f.selected,disabled:f.protected});
+      cb.onchange = async () => { sum = (await api('/api/scans/'+sc.id+'/health/select',{ids:[f.id],selected:cb.checked})).summary; draw(); };
+      const t = (f.detail && f.detail.start) ? Math.max(0, f.detail.start-2) : 0;
+      const img = el('img',{src:`/api/health/${f.id}/frame?t=${t.toFixed(1)}`,loading:'lazy',title:'Click to see what is wrong',style:'cursor:pointer',onclick:()=>frames(f)});
+      img.onerror = () => img.replaceWith(el('div',{class:'ph',title:'No picture could be read'}));
+      const i = f.path.lastIndexOf('/'), col = f.sev>=3 ? 'var(--danger)' : f.sev===2 ? 'var(--warn)' : 'var(--mute)';
+      list.append(el('div',{class:'f'+(f.selected?' sel':'')},
+        cb, img,
+        el('div',{class:'nm',title:f.path}, el('b',{class:'link',title:'Click to see what is wrong',onclick:()=>frames(f)}, f.path.slice(i+1)), el('span',{}, '‎'+f.path.slice(0,i)),
+          el('span',{style:'display:block;color:'+col+';white-space:normal'}, f.reason)),
+        el('div',{}, fmtSize(f.size)),
+        el('div',{class:'mute'}, fmtDate(f.mtime)),
+        el('div',{style:'display:flex;gap:6px;justify-content:flex-end'}, f.protected ? el('span',{class:'badge prot'},'protected') : '',
+          el('span',{class:'badge',style:'color:'+col},KIND[f.kind]||f.kind),
+          el('button',{class:'btn sm',onclick:()=>frames(f)},'Details'))));
+    });
+    loaded += d.files.length;
+    more.classList.toggle('hide', d.files.length < 100);
+    if(reset && !d.files.length) list.append(el('div',{class:'empty'}, (q||kind) ? 'Nothing matches that filter.' : (sum.handled ? 'All suspect videos have been dealt with 🎉' : 'No damaged videos found 🎉')));
+  }
+  m.replaceChildren(
+    el('div',{class:'mute small',style:'margin-bottom:8px'}, `Scan #${sc.id} · Health check: videos · ${fmtDate(sc.started)} · ${sc.stats.files?.toLocaleString()} videos checked in ${sc.stats.seconds}s`
+      + ` · ${sc.params.health_mode==='full'?'full':'quick'} check · flagged when blank or unreadable for ${sc.params.blank_secs||45}s or more` + (sc.params.deep ? ' · full decode on' : '')),
+    chips,
+    el('div',{class:'toolbar'}, mk('Select all','primary',()=>bulk(true)), mk('Clear selection','',()=>bulk(false)), kindSel,
+      el('span',{class:'mute small'},'(applies to the filtered list when a filter is set)'), el('span',{style:'flex:1'}), filter),
+    el('div',{class:'toolbar'}, mk('Move to quarantine','danger',()=>act('trash')), mk('Move to folder…','',()=>act('move')),
+      el('span',{class:'mute small'},'Click a picture or name to see the frames before and inside the problem, and whether other copies exist.')),
+    list, el('div',{style:'text-align:center;margin:16px'}, more));
+  await load(true);
+}
+async function viewLarge(sc){
+  const m = $('#main'); let q = '', kind = '', loaded = 0, sum = null, top = 0, poll = null, seen = false;
+  const chips = el('div',{class:'chips'}), list = el('div',{class:'card',style:'padding:0'});
+  const more = el('button',{class:'btn hide',onclick:()=>load(false)},'Load more');
+  const filter = el('input',{type:'text',placeholder:'Filter by path…',style:'width:220px'});
+  filter.onkeydown = e => { if(e.key==='Enter'){ q=filter.value; load(true); } };
+  const KIND = {good:'Compresses well', maybe:'May compress', poor:'Already compressed'};
+  const kindSel = el('select',{style:'width:auto',onchange:()=>{ kind = kindSel.value; load(true); }});
+  const mk = (t,c,fn) => el('button',{class:'btn '+c,onclick:fn},t);
+  const has7z = !!S.cfg.sevenzip;
+  const fmt = el('select',{style:'width:auto'}, el('option',{value:'7z',disabled:!has7z,selected:has7z},'7z (best compression)'+(has7z?'':' — not installed yet')), el('option',{value:'zip',selected:!has7z},'zip (opens anywhere)'));
+  const level = el('select',{style:'width:auto'}, el('option',{value:'normal'},'Normal'), el('option',{value:'fast'},'Fast (less squeezing, easier on the NAS)'));
+  const keep = el('input',{type:'checkbox'});
+  const prog = el('div',{class:'hide',style:'margin:8px 0'});
+  S.refresh = () => load(true);
+  function draw(){
+    if(!sum) return;
+    chips.replaceChildren(el('div',{class:'chip'},el('b',{},sum.listed.toLocaleString()),'big files listed'),
+      el('div',{class:'chip'},el('b',{},fmtSize(sum.bytes)),'in those files'),
+      el('div',{class:'chip sel'},el('b',{},sum.selected.toLocaleString()+' · '+fmtSize(sum.selected_bytes)),'selected'),
+      sum.handled ? el('div',{class:'chip'},el('b',{},sum.handled.toLocaleString()),'moved / quarantined') : '');
+    const cur = kindSel.value;
+    kindSel.replaceChildren(el('option',{value:''},'All file types'), ...['good','maybe','poor'].filter(k=>sum.kinds[k]).map(k => el('option',{value:k,selected:k===cur},`${KIND[k]} (${sum.kinds[k]})`)));
+  }
+  async function bulk(selected){ try{ sum = (await api('/api/scans/'+sc.id+'/health/select',{selected,q,kind})).summary; draw(); load(true); }catch(e){ toast(e.message) } }
+  async function pickTop(n){
+    try{
+      await api('/api/scans/'+sc.id+'/health/select',{selected:false,q,kind});
+      const d = await api(`/api/scans/${sc.id}/health?offset=0&limit=${n}&q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}`);
+      sum = (await api('/api/scans/'+sc.id+'/health/select',{ids:d.files.filter(f=>!f.protected).map(f=>f.id),selected:true})).summary; draw(); load(true);
+    }catch(e){ toast(e.message) }
+  }
+  async function act(action){
+    if(!sum || !sum.selected) return toast('Nothing selected');
+    const run = async dest => {
+      try{
+        const r = await api('/api/scans/'+sc.id+'/health/act',{action,dest}); sum = r.summary; draw(); load(true);
+        toast(`${r.done} ${action==='trash'?'sent to quarantine':'moved'}, ${r.skipped} skipped`, 6000); if(r.errors.length) showErrors(r.errors);
+      }catch(e){ toast(e.message, 8000) }
+    };
+    if(action==='trash'){ if(confirm(`Move ${sum.selected.toLocaleString()} files (${fmtSize(sum.selected_bytes)}) to the quarantine?\nThey can be restored from the Quarantine tab until you purge them.`)) run(); }
+    else pickFolder('Move selected files to…', p => { if(confirm(`Move ${sum.selected.toLocaleString()} files to\n${p}?`)) run(p); });
+  }
+  async function compress(){
+    if(!sum || !sum.selected) return toast('Nothing selected');
+    try{ await api('/api/scans/'+sc.id+'/health/compress',{format:fmt.value,level:level.value,keep:keep.checked}); toast('Compression started. It runs in the background; you can leave this page.'); watch(); }
+    catch(e){ toast(e.message, 8000) }
+  }
+  function watch(){ if(poll) return; tick(); poll = setInterval(tick, 2000); }
+  async function tick(){
+    let st; try{ st = await api('/api/compress/status'); }catch(e){ return; }
+    if(st.running) seen = true;
+    if(!seen && !st.running){ clearInterval(poll); poll = null; return; }      // nothing running, and nothing finished while this page was open
+    if(st.sid!==sc.id && !st.running){ prog.classList.add('hide'); clearInterval(poll); poll = null; return; }
+    if(!document.body.contains(chips)){ clearInterval(poll); poll = null; return; }       // left this page
+    if(st.running){
+      prog.classList.remove('hide');
+      prog.replaceChildren(el('div',{class:'warnbar'}, el('b',{},`Compressing ${st.done+st.failed+1} of ${st.total}: `), el('span',{class:'mute',style:'word-break:break-all'}, st.current||'…'),
+        el('span',{style:'flex:1'}), mk('Cancel','',()=>api('/api/compress/cancel',{}))));
+    } else {
+      clearInterval(poll); poll = null;
+      prog.replaceChildren(el('div',{class:'warnbar'}, el('b',{},`Compression finished: ${st.done} done`+(st.failed?`, ${st.failed} skipped`:'')),
+        el('span',{class:'mute'}, st.done ? ` · ${fmtSize(st.saved)} freed (the originals are in the quarantine until you purge them)` : ''), el('span',{style:'flex:1'}), mk('Close','',()=>prog.classList.add('hide'))));
+      prog.classList.remove('hide'); if(st.errors && st.errors.length) showErrors(st.errors); sum = st.summary || sum; draw(); load(true);
+    }
+  }
+  async function load(reset){
+    if(reset){ loaded = 0; list.replaceChildren(); }
+    const d = await api(`/api/scans/${sc.id}/health?offset=${loaded}&limit=100&q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}`);
+    sum = d.summary; draw();
+    if(reset) top = d.files.length ? d.files[0].size : top;
+    d.files.forEach(f => {
+      const cb = el('input',{type:'checkbox',checked:f.selected,disabled:f.protected});
+      cb.onchange = async () => { sum = (await api('/api/scans/'+sc.id+'/health/select',{ids:[f.id],selected:cb.checked})).summary; draw(); };
+      const i = f.path.lastIndexOf('/'), pct = top ? Math.max(2, Math.round(f.size*100/top)) : 100;
+      const col = f.kind==='good' ? 'var(--ok)' : f.kind==='poor' ? 'var(--mute)' : 'var(--warn)';
+      const ext = (f.path.match(/\.([^./]+)$/)||[])[1];
+      list.append(el('div',{class:'f'+(f.selected?' sel':'')},
+        cb, el('div',{class:'ph',style:'display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--mute)'}, ext ? ext.toUpperCase().slice(0,5) : ''),
+        el('div',{class:'nm',title:f.path}, el('b',{class:'link',title:'Click to open this file',onclick:()=>showFile({id:f.fid,path:f.path,kind:'other',size:f.size,mtime:f.mtime})}, f.path.slice(i+1)), el('span',{}, '‎'+f.path.slice(0,i)),
+          el('span',{style:'display:block;color:'+col}, f.reason),
+          el('span',{style:`display:block;height:4px;margin-top:4px;border-radius:2px;width:${pct}%;background:var(--accent,#6366f1);opacity:.7`})),
+        el('div',{style:'font-weight:600'}, fmtSize(f.size)),
+        el('div',{class:'mute'}, fmtDate(f.mtime)),
+        el('div',{style:'display:flex;gap:6px;justify-content:flex-end'}, f.protected ? el('span',{class:'badge prot'},'protected') : '',
+          el('span',{class:'badge',style:'color:'+col},KIND[f.kind]||f.kind))));
+    });
+    loaded += d.files.length;
+    more.classList.toggle('hide', d.files.length < 100);
+    if(reset && !d.files.length) list.append(el('div',{class:'empty'}, (q||kind) ? 'Nothing matches that filter.' : (sum.handled ? 'All the big files have been dealt with 🎉' : 'No files that big were found.')));
+  }
+  m.replaceChildren(
+    el('div',{class:'mute small',style:'margin-bottom:8px'}, `Scan #${sc.id} · Large files · ${fmtDate(sc.started)} · ${sc.stats.files?.toLocaleString()} files looked at in ${sc.stats.seconds}s · biggest first · ${sc.params.min_kb>=1024 ? 'at least '+fmtSize(sc.params.min_kb*1024) : 'min size '+sc.params.min_kb+' KB'}`),
+    chips,
+    el('div',{class:'toolbar'}, mk('Select all','primary',()=>bulk(true)), mk('Clear selection','',()=>bulk(false)),
+      mk('Select the 10 biggest','',()=>pickTop(10)), kindSel, el('span',{style:'flex:1'}), filter),
+    el('div',{class:'toolbar'}, mk('Move to quarantine','danger',()=>act('trash')), mk('Move to folder…','',()=>act('move'))),
+    el('div',{class:'toolbar'}, el('b',{},'Compress selected:'), fmt, level,
+      el('label',{style:'display:flex;gap:6px;align-items:center;color:var(--text)',title:'Leave the original where it is as well as the new archive. Off by default: the original is moved to the quarantine so you can restore it.'}, keep, 'Keep the original too'),
+      mk('Compress','primary',compress),
+      el('span',{class:'mute small'}, 'Makes “name.7z” (or .zip) beside each file, tests it, then moves the original to quarantine. Slow on a NAS, so it runs in the background. Photos, video, music and zips barely shrink.')),
+    prog, list, el('div',{style:'text-align:center;margin:16px'}, more));
+  await load(true);
+  watch();
+}
+const isPdf = f => /\.pdf$/i.test(f.path);
+function pdfFrame(f,h){ return el('iframe',{src:'/api/raw/'+f.id+'#view=FitH',style:'width:100%;height:'+h+';border:0;background:#fff;border-radius:6px',title:f.path.split('/').pop()}); }
+function showImage(id){ const m = el('div',{class:'modal img',onclick:()=>m.remove()}, el('div',{}, el('img',{src:'/api/thumb/'+id+'?s=1600'}))); document.body.append(m); }
+function showPlayer(kind, id){
+  const p = el(kind,{controls:true,autoplay:true,src:'/api/raw/'+id});
+  const m = el('div',{class:'modal img',onclick:e=>{ if(e.target===m){ p.pause(); m.remove(); } }}, el('div',{}, p,
+    el('div',{class:'mute small',style:'padding:6px'},'If it will not play, your browser may not support this format.')));
+  document.body.append(m);
+}
+function fmtDur(t){ t=Math.round(t); const h=Math.floor(t/3600), mi=Math.floor(t%3600/60), se=t%60; return (h?h+':'+String(mi).padStart(2,'0'):mi)+':'+String(se).padStart(2,'0'); }
+function metaLine(f){
+  const m = f.meta||{}, p = [];
+  if(m.artist||m.title) p.push([m.artist,m.title].filter(Boolean).join(' – '));
+  if(m.w&&m.h) p.push(m.w+'×'+m.h);
+  if(m.dur) p.push(fmtDur(m.dur));
+  if(m.br) p.push(m.br>=1e6 ? (m.br/1e6).toFixed(1)+' Mbps' : Math.round(m.br/1000)+' kbps');
+  if(m.codec) p.push(m.codec);
+  if(m.taken) p.push('taken '+m.taken.slice(0,10).replace(/:/g,'-'));
+  return p.length ? el('span',{class:'meta'}, p.join(' · ')) : '';
+}
+const CODECS = {h264:'H.264', hevc:'H.265 (HEVC)', mpeg4:'MPEG-4', vp9:'VP9', vp8:'VP8', av1:'AV1', mpeg2video:'MPEG-2', wmv3:'WMV', wmv2:'WMV', msmpeg4v3:'MS MPEG-4', aac:'AAC', mp3:'MP3', ac3:'AC-3', eac3:'E-AC-3', opus:'Opus', vorbis:'Vorbis', flac:'FLAC', pcm_s16le:'PCM', amr_nb:'AMR'};
+const codecName = c => CODECS[c] || (c ? c.toUpperCase() : '');
+const bitrateOf = f => { const m = f.meta||{}; return m.br || (m.dur>0 ? f.size*8/m.dur : 0); };
+const fmtRate = b => b>=1e6 ? (b/1e6).toFixed(1)+' Mbps' : Math.round(b/1000)+' kbps';
+/* "H.264 · 1.7 Mbps · AAC audio" — what explains a file-size difference between two copies of the same video */
+function techLine(f){
+  const m = f.meta||{}, p = [];
+  if(f.kind==='video'){
+    if(m.codec) p.push(codecName(m.codec));
+    const b = bitrateOf(f); if(b) p.push(fmtRate(b));
+    if(m.w) p.push(m.acodec ? codecName(m.acodec)+' audio' : 'no audio');
+  }
+  if(f.kind==='img'){
+    const ext = (f.path.match(/\.([^./]+)$/)||[])[1];
+    if(ext) p.push(ext.toUpperCase().replace('JPG','JPEG'));
+    if(m.w && m.h){ p.push((m.w*m.h/1e6).toFixed(1)+' MP'); p.push((f.size*8/(m.w*m.h)).toFixed(1)+' bits/pixel'); }
+    p.push(m.taken ? 'taken '+m.taken.slice(0,10).replace(/:/g,'-') : 'no date taken');
+    p.push('modified '+fmtDate(f.mtime).replace(/, \d+:\d+.*$/,''));
+  }
+  if(m.dur) p.push(fmtDur(m.dur));
+  return p.join(' · ');
+}
+function showErrors(errs){
+  const m = el('div',{class:'modal'}, el('div',{}, el('h2',{style:'margin-top:0'},'Some files were skipped'), el('div',{class:'errs'},errs.join('\n')),
+     el('div',{style:'text-align:right;margin-top:10px'}, el('button',{class:'btn',onclick:()=>m.remove()},'Close'))));
+  document.body.append(m);
+}
+
+/* ---------- quarantine ---------- */
+async function viewTrash(){
+  const m = $('#main'); const d = await api('/api/trash');
+  const checks = new Set();
+  const tb = el('tbody');
+  d.items.forEach(i => tb.append(el('tr',{},
+    el('td',{},el('input',{type:'checkbox',onchange:e=>e.target.checked?checks.add(i.id):checks.delete(i.id)})),
+    el('td',{style:'word-break:break-all'},i.orig_path), el('td',{},fmtSize(i.size)), el('td',{class:'mute'},fmtDate(i.ts)))));
+  const run = async (url, body, msg) => { const r = await api(url, body); toast(`${r.done} ${msg}`+(r.errors.length?`, ${r.errors.length} problems`:'')); if(r.errors.length) showErrors(r.errors); viewTrash(); };
+  m.replaceChildren(el('div',{class:'card'}, el('h2',{},`Quarantine — ${d.count.toLocaleString()} files, ${fmtSize(d.bytes)}`),
+    el('p',{class:'mute small'},'Removed duplicates wait here (a hidden “'+S.cfg.trash_name+'” folder inside each shared folder) until you empty it. Restore puts a file back where it came from.'),
+    el('div',{class:'toolbar'},
+      el('button',{class:'btn',onclick:()=>checks.size?run('/api/trash/restore',{ids:[...checks]},'restored'):toast('Tick some files first')},'Restore selected'),
+      el('button',{class:'btn',onclick:()=>{ if(!checks.size) return toast('Tick some files first'); if(confirm(`Permanently delete ${checks.size} files?`)) run('/api/trash/purge',{ids:[...checks]},'deleted'); }},'Delete selected forever'),
+      el('button',{class:'btn danger',onclick:()=>{ if(d.count && confirm(`Permanently delete ALL ${d.count} quarantined files (${fmtSize(d.bytes)})?`)) run('/api/trash/purge',{all:true},'deleted'); }},'Empty quarantine')),
+    d.items.length ? el('table',{}, el('thead',{},el('tr',{},el('th',{}),el('th',{},'Original location'),el('th',{},'Size'),el('th',{},'Removed'))), tb) : el('div',{class:'empty'},'Quarantine is empty.')));
+}
+
+/* ---------- history ---------- */
+async function viewHistory(){
+  const {scans} = await api('/api/scans'); const m = $('#main');
+  const tb = el('tbody');
+  const stat = s => el('td',{}, el('span',{class:'pill '+(s.status==='done'?'ok':s.status==='error'?'bad':'warn')}, s.status), s.message ? el('span',{class:'sub',title:s.message}, s.message.slice(0,70)) : '');
+  scans.forEach(s => tb.append(el('tr',{},
+    el('td',{},'#'+s.id), el('td',{},(s.source==='schedule'?'⏰ ':'')+fmtDate(s.started), el('span',{class:'sub'}, s.job_name ? 'Job: '+s.job_name : s.job_id ? 'Job (deleted)' : 'Manual scan')),
+    el('td',{},methodLabel(s.params.family, s.mode)),
+    el('td',{style:'word-break:break-all'},(s.params.roots||[]).map(r=>r.path).join(', ')), stat(s), el('td',{},s.stats.groups!=null?s.stats.groups.toLocaleString():''),
+    el('td',{}, el('div',{class:'actions'}, s.status==='done'?el('button',{class:'btn sm',onclick:()=>{S.scanId=s.id;store.set('scanId',s.id);go('results')}},'Open'):'',
+      el('button',{class:'btn sm',onclick:async()=>{ if(!confirm('Delete scan #'+s.id+' results? (No files are touched.)')) return; try{ await api('/api/scans/'+s.id,undefined,'DELETE'); if(S.scanId===s.id){S.scanId=null} viewHistory(); }catch(e){toast(e.message)} }},'Delete'))))));
+  const days = el('input',{type:'number',min:0,max:3650,value:7,style:'width:80px'});
+  const ci = await api('/api/cache').catch(()=>null);
+  const cdays = el('input',{type:'number',min:0,max:3650,value:ci?ci.days:30,style:'width:80px'});
+  const cacheCard = ci ? el('div',{class:'card'}, el('h2',{},'Speed-up cache'),
+    el('p',{class:'mute small'}, `${ci.entries.toLocaleString()} files remembered. Scans reuse this so unchanged files are not read again. Entries for files not seen in any scan for ${ci.days} days are removed automatically after each scan; files waiting in the quarantine are kept.`),
+    el('div',{class:'toolbar'}, 'Forget files not seen for', cdays, 'days',
+      el('button',{class:'btn',onclick:async()=>{ if(!confirm(`Forget cached details of files not seen in ${cdays.value} days? Your files are not touched; those files are simply read again if they come back.`)) return;
+        try{ const r=await api('/api/cache/clean',{days:+cdays.value}); toast(r.removed.toLocaleString()+' entries removed'); viewHistory(); }catch(e){toast(e.message)} }},'Clean cache now'))) : '';
+  const ign = await api('/api/ignores').catch(()=>({items:[]}));
+  const scopeSel = el('select',{style:'width:auto'}, el('option',{value:'all'},'Empty-folder scans and duplicate/health scans'), el('option',{value:'empty'},'Empty-folder scans only (keep it empty)'), el('option',{value:'scan'},'Duplicate and health scans only (skip it)'));
+  const SCOPE = {all:'all scans', empty:'empty-folder scans', scan:'duplicate & health scans'};
+  const ignRows = ign.items.map(i => el('tr',{},
+    el('td',{}, i.kind==='folder' ? 'Folder' : 'Duplicate group'),
+    el('td',{style:'word-break:break-all'}, i.kind==='folder' ? i.path : el('span',{title:i.paths.join('\n')}, i.paths.map(p=>p.split('/').pop()).slice(0,3).join('  +  ')+(i.paths.length>3?`  (+${i.paths.length-3} more)`:'')+`  · ${i.paths.length} files`)),
+    el('td',{}, i.kind==='folder' ? SCOPE[i.scope] : 'duplicate scans'),
+    el('td',{}, fmtDate(i.created)),
+    el('td',{}, el('button',{class:'btn sm',onclick:async()=>{ try{ await api('/api/ignores/'+i.id+'/delete',{}); viewHistory(); }catch(e){ toast(e.message) } }},'Remove'))));
+  const ignoreCard = el('div',{class:'card'}, el('h2',{},'Ignore list'),
+    el('p',{class:'mute small'},'Folders and duplicate groups you chose to ignore permanently. This applies to every scan, including scheduled jobs. A folder on the list is skipped (or kept, for empty-folder scans); a duplicate group on the list is hidden as long as it is made only of the same files. Remove an entry to bring it back at the next scan.'),
+    el('div',{class:'toolbar'}, scopeSel, el('button',{class:'btn',onclick:()=>pickFolder('Ignore this folder', async p => { try{ await api('/api/ignores',{path:p,scope:scopeSel.value}); viewHistory(); toast('Added to the ignore list'); }catch(e){ toast(e.message) } })},'Add a folder…')),
+    ign.items.length ? el('table',{}, el('thead',{},el('tr',{},...['Type','What','Applies to','Added',''].map(h=>el('th',{},h)))), el('tbody',{},...ignRows)) : el('div',{class:'empty'},'Nothing ignored yet. Use “Ignore” on a duplicate group or an empty folder, or the right-click menu on a file.'));
+  m.replaceChildren(ignoreCard, cacheCard, el('div',{class:'card'}, el('h2',{},'Scan history'),
+    el('div',{class:'toolbar'}, el('span',{class:'mute small'},'Clean up saved results (no files are touched):'), 'Older than', days, 'days',
+      el('button',{class:'btn',onclick:async()=>{ if(!confirm(`Delete all saved scan results older than ${days.value} days?`)) return; try{ const r=await api('/api/scans/cleanup',{older_than_days:+days.value}); toast(r.deleted+' old scans removed'); viewHistory(); }catch(e){toast(e.message)} }},'Delete old results')),
+    scans.length ? el('table',{}, el('thead',{},el('tr',{},...['Scan','Started','Match','Folders','Status','Groups',''].map(h=>el('th',{},h)))), tb) : el('div',{class:'empty'},'No scans yet.')));
+}
+
+/* ---------- scheduled jobs ---------- */
+const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+function schedText(sc){
+  const stop = sc.stop_at ? `, stops by ${sc.stop_at}` : '';
+  if(sc.type==='once') return 'Once on '+sc.at.replace('T',' at ')+stop;
+  if(sc.type==='daily') return `Every day at ${sc.time}${stop}`;
+  return `${(sc.days||[]).map(d=>DAYS[d]).join(', ')} at ${sc.time}${stop}`;
+}
+function endEdit(){
+  if(S.rootsBackup){ S.roots = S.rootsBackup; store.set('roots', S.roots); }
+  S.editJob = null; S.rootsBackup = null; go('jobs');
+}
+function choose(title, msg, options){
+  return new Promise(res => {
+    const m = el('div',{class:'modal'}, el('div',{}, el('h2',{style:'margin-top:0'},title), el('p',{},msg),
+      el('div',{class:'actions',style:'justify-content:flex-end'}, ...options.map(([val,label,cls]) => el('button',{class:'btn '+(cls||''),onclick:()=>{m.remove();res(val)}},label)))));
+    document.body.append(m);
+  });
+}
+function openJobModal(job, body){
+  const sc = job ? job.schedule : {type:'daily', time:'02:00'};
+  const t = new Date(Date.now()+86400000), pad = n => String(n).padStart(2,'0');
+  const name = el('input',{type:'text',value:job?job.name:'',placeholder:'e.g. Nightly video check – home folders'});
+  const type = el('select',{}, [['daily','Every day'],['weekly','On selected days'],['once','Just once']].map(([v,l])=>el('option',{value:v,selected:sc.type===v},l)));
+  const time = el('input',{type:'time',value:sc.time||'02:00'});
+  const at = el('input',{type:'datetime-local',value:sc.at||`${t.getFullYear()}-${pad(t.getMonth()+1)}-${pad(t.getDate())}T02:00`});
+  const dayBoxes = DAYS.map((d,i)=>el('input',{type:'checkbox',checked:(sc.days||[0,1,2,3,4,5,6]).includes(i)}));
+  const daysRow = el('div',{style:'display:flex;gap:12px;flex-wrap:wrap;margin-top:6px'}, DAYS.map((d,i)=>el('label',{style:'display:flex;gap:4px;align-items:center;margin:0;color:var(--text)'}, dayBoxes[i], d)));
+  const stopOn = el('input',{type:'checkbox',checked:!!sc.stop_at}); const stop = el('input',{type:'time',value:sc.stop_at||'06:00',style:'width:130px'});
+  const keep = el('input',{type:'number',min:1,max:50,value:job?job.keep_runs:3,style:'width:90px'});
+  const enabled = el('input',{type:'checkbox',checked:job?!!job.enabled:true});
+  const sync = () => { const v=type.value; time.parentElement.classList.toggle('hide',v==='once'); at.parentElement.classList.toggle('hide',v!=='once'); daysRow.classList.toggle('hide',v!=='weekly'); stop.classList.toggle('hide',!stopOn.checked); };
+  type.onchange = sync; stopOn.onchange = sync;
+  const lab = (txt, ...kids) => el('div',{}, el('label',{},txt), ...kids);
+  const m = el('div',{class:'modal'}, el('div',{},
+    el('h2',{style:'margin-top:0'}, job ? 'Save scheduled job' : 'New scheduled job'),
+    lab('Job name', name),
+    lab('Repeat', type), daysRow,
+    lab('Start time', time), lab('Date and time', at),
+    el('label',{style:'display:flex;gap:8px;align-items:center;color:var(--text);margin-top:12px'}, stopOn, 'Stop automatically at', stop),
+    el('div',{class:'mute small'},'If it is still running at that time it stops, and what it has already read is cached so the next run carries on from there.'),
+    lab('Keep results of the last … runs', keep),
+    el('label',{style:'display:flex;gap:8px;align-items:center;color:var(--text);margin-top:12px'}, enabled, 'Enabled'),
+    el('p',{class:'mute small'}, `Times use the server clock (${S.cfg.tz}). ${body.family==='folders' ? (body.auto_remove ? 'This job deletes the empty folders it finds (rmdir, so nothing with files in it is touched).' : 'This job only lists empty folders for you to review.') : 'The job only finds duplicates for you to review. It never removes anything by itself.'}`),
+    el('div',{class:'actions',style:'justify-content:flex-end'},
+      el('button',{class:'btn',onclick:()=>m.remove()},'Cancel'),
+      el('button',{class:'btn primary',onclick:async()=>{
+        const sched = {type:type.value};
+        if(sched.type==='once') sched.at = at.value; else sched.time = time.value;
+        if(sched.type==='weekly') sched.days = dayBoxes.map((b,i)=>b.checked?i:-1).filter(i=>i>=0);
+        if(stopOn.checked) sched.stop_at = stop.value;
+        const payload = {name:name.value, params:body, schedule:sched, keep_runs:+keep.value, enabled:enabled.checked};
+        try{
+          if(job) await api('/api/jobs/'+job.id, payload, 'PUT'); else await api('/api/jobs', payload);
+          m.remove(); toast('Job saved');
+          if(S.rootsBackup){ S.roots = S.rootsBackup; store.set('roots', S.roots); }
+          S.editJob = null; S.rootsBackup = null; go('jobs');
+        }catch(e){ toast(e.message, 6000) }
+      }},'Save job'))));
+  document.body.append(m); sync();
+}
+async function viewJobs(){
+  const d = await api('/api/jobs'); const m = $('#main');
+  const tb = el('tbody');
+  d.jobs.forEach(j => {
+    const last = j.last, p = j.params;
+    const lastCell = last ? el('td',{}, el('span',{class:'pill '+(last.status==='done'?'ok':last.status==='error'?'bad':'warn')}, last.status),
+        el('span',{class:'sub'}, (last.finished?fmtDate(last.finished):'')+(last.status==='done'?(p.family==='folders'?` · ${last.stats.groups} empty folders`+(last.stats.removed?`, ${last.stats.removed} removed`:''):(p.family==='health'?` · ${last.stats.groups} suspect videos`:` · ${last.stats.groups} groups`)):'')),
+        last.message ? el('span',{class:'sub',title:last.message}, last.message.slice(0,60)) : '',
+        last.status==='done' ? el('button',{class:'btn sm',style:'margin-top:4px'+((p.family==='folders'&&p.auto_remove)?';opacity:.6':''),title:(p.family==='folders'&&p.auto_remove)?'Auto-delete job: the folders were already removed, so this list is normally empty':'',onclick:()=>{S.scanId=last.id;store.set('scanId',last.id);go('results')}},'Open results') : '')
+      : el('td',{class:'mute'},'not run yet');
+    tb.append(el('tr',{},
+      el('td',{}, el('input',{type:'checkbox',checked:!!j.enabled,title:'Enable / pause this job',onchange:async e=>{ try{ await api('/api/jobs/'+j.id,{enabled:e.target.checked},'PUT'); viewJobs(); }catch(x){toast(x.message)} }})),
+      el('td',{}, el('b',{},j.name), el('span',{class:'sub'}, methodLabel(p.family,p.mode)), (p.family==='folders' && p.auto_remove) ? el('span',{class:'pill warn',style:'margin-top:4px;display:inline-block',title:'This job deletes the empty folders it finds as soon as the scan finishes, so its results list is normally empty. The number removed is shown under Last run.'},'AUTO-DELETES') : ''),
+      el('td',{style:'word-break:break-all'}, (p.roots||[]).map(r=>r.path+(r.protected?' (protected)':'')).join(', ')),
+      el('td',{}, schedText(j.schedule), el('span',{class:'sub'}, j.enabled && j.next_run ? 'Next: '+fmtDate(j.next_run) : j.enabled ? 'Finished' : 'Paused')),
+      lastCell,
+      el('td',{}, String(j.keep_runs)),
+      el('td',{}, el('div',{class:'actions'},
+        el('button',{class:'btn sm',onclick:async()=>{ try{ await api('/api/jobs/'+j.id+'/run',{}); startPolling(); toast('Job started'); }catch(x){toast(x.message)} }},'Run now'),
+        j.runs ? el('button',{class:'btn sm',title:'Delete the saved results of this job but keep the job and its schedule (no files are touched)',onclick:async()=>{ try{ const r = await api('/api/jobs/'+j.id+'?results=only',undefined,'DELETE'); toast('Cleared '+r.cleared+' saved result'+(r.cleared===1?'':'s')); viewJobs(); }catch(x){toast(x.message)} }},'Clear results') : '',
+        el('button',{class:'btn sm',onclick:()=>{ S.rootsBackup=[...S.roots]; S.roots=(j.params.roots||[]).map(r=>({...r})); S.editJob=j; go('scan'); }},'Edit'),
+        el('button',{class:'btn sm',onclick:async()=>{
+          const c = await choose('Delete “'+j.name+'”?', 'The job stops running. Do you also want to delete the saved results from its previous runs? (No files are touched either way.)',
+            [['no','Cancel'],['job','Delete job, keep results'],['all','Delete job and results','danger']]);
+          if(c==='no') return;
+          try{ await api('/api/jobs/'+j.id+(c==='all'?'?results=1':''),undefined,'DELETE'); viewJobs(); }catch(x){toast(x.message)}
+        }},'Delete')))));
+  });
+  m.replaceChildren(el('div',{class:'card'}, el('h2',{},'Scheduled jobs'),
+    el('p',{class:'mute small'}, `Jobs scan at the times you choose (server clock: ${S.cfg.tz}), at low priority so the NAS stays responsive. They only find duplicates; you review and clean up on the Results tab. The newest runs of each job are kept and older ones are removed automatically.`),
+    el('div',{class:'toolbar'}, el('button',{class:'btn primary',onclick:()=>{ toast('Set up the scan below, then click “Save as scheduled job…”',6000); go('scan'); }},'+ New scheduled job')),
+    d.jobs.length ? el('table',{}, el('thead',{},el('tr',{},...['On','Job','Folders','Schedule','Last run','Keep','' ].map(h=>el('th',{},h)))), tb)
+      : el('div',{class:'empty'},'No scheduled jobs yet. On the Scan tab, set up a scan and choose “Save as scheduled job…”.')));
+}
+
+/* ---------- open a file ---------- */
+async function copyText(txt){
+  try{ if(navigator.clipboard && window.isSecureContext){ await navigator.clipboard.writeText(txt); return true; } }catch(e){}
+  const ta = el('textarea',{style:'position:fixed;opacity:0'}); ta.value = txt; document.body.append(ta); ta.select();
+  let ok = false; try{ ok = document.execCommand('copy'); }catch(e){} ta.remove(); return ok;
+}
+async function showEmpty(f){
+  let i; try{ i = await api('/api/emptyinfo/'+f.id); }catch(e){ return toast('Could not look at that folder.'); }
+  const m = el('div',{class:'modal',onclick:e=>{ if(e.target===m) m.remove(); }});
+  const cp = (txt, label) => async () => { toast((await copyText(txt)) ? label+' copied' : 'Could not copy — select the text and press Ctrl+C'); };
+  const kindIcon = {folder:'📁',file:'📄',link:'🔗',unreadable:'⚠'};
+  const rows = i.entries.length ? i.entries.map(e => el('div',{style:'padding:3px 0;font-size:13px'}, (kindIcon[e.kind]||'')+' '+e.name, e.size!=null?el('span',{class:'mute'},'  '+fmtSize(e.size)):'', e.kind==='folder'?el('span',{class:'mute'},'  (folder)'):''))
+    : [el('div',{class:'mute small'}, i.exists ? 'Nothing inside it.' : 'This folder no longer exists.')];
+  m.append(el('div',{},
+    el('h2',{style:'margin-top:0;word-break:break-all'}, i.name),
+    el('label',{},'On the NAS'), el('div',{class:'mono'}, i.nas_path),
+    el('label',{},'Windows network path (paste into File Explorer’s address bar)'), el('div',{class:'mono'}, i.unc),
+    el('label',{},'What is inside it right now'),
+    el('div',{style:'max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:6px 10px;margin:4px 0 10px'}, ...rows, i.more?el('div',{class:'mute small'},'… and more'):''),
+    el('div',{class:'actions'},
+      el('button',{class:'btn primary',onclick:cp(i.unc,'Windows path')},'Copy Windows path'),
+      el('a',{class:'btn',href:i.dsm_url,target:'_blank',rel:'noopener',title:'Opens DSM File Station at this folder'},'Open in File Station'),
+      el('button',{class:'btn',onclick:cp(i.nas_path,'NAS path')},'Copy NAS path')),
+    el('div',{class:'actions',style:'justify-content:flex-end;margin-top:10px'}, el('button',{class:'btn',onclick:()=>m.remove()},'Close'))));
+  document.body.append(m);
+}
+async function showFile(f){
+  let i; try{ i = await api('/api/fileinfo/'+f.id); }catch(e){ return toast('That file is no longer there — it may have been moved or deleted since the scan.', 6000); }
+  const m = el('div',{class:'modal',onclick:e=>{ if(e.target===m) m.remove(); }});
+  const cp = (txt, label) => async () => { toast((await copyText(txt)) ? label+' copied' : 'Could not copy — select the text and press Ctrl+C'); };
+  m.append(el('div',{},
+    el('h2',{style:'margin-top:0;word-break:break-all'}, i.name),
+    el('div',{class:'mute small'}, fmtSize(i.size)+' · modified '+fmtDate(i.mtime)),
+    el('label',{},'Windows network path (paste into File Explorer’s address bar to open it in its normal program)'), el('div',{class:'mono'}, i.unc),
+    el('label',{},'On the NAS'), el('div',{class:'mono'}, i.nas_path),
+    el('div',{class:'actions',style:'margin-top:6px'},
+      i.viewable ? el('a',{class:'btn primary',href:'/api/raw/'+f.id,target:'_blank',rel:'noopener'},'Open in browser') : '',
+      el('a',{class:'btn'+(i.viewable?'':' primary'),href:'/api/raw/'+f.id+'?dl=1'}, i.viewable?'Download':'Download / open'),
+      el('button',{class:'btn',onclick:cp(i.unc,'Windows path')},'Copy Windows path'),
+      el('button',{class:'btn',onclick:cp(i.unc_folder,'Folder path')},'Copy folder path'),
+      el('button',{class:'btn',title:'Move this file to another folder on the server',onclick:()=>pickFolder('Move this file to…', async p => {
+        try{ const r = await api('/api/files/'+f.id+'/move',{dest:p}); m.remove(); toast('Moved to '+r.target, 6000); if(S.refresh) S.refresh(); }
+        catch(e){ toast(e.message, 7000) } })},'Move to folder…'),
+      el('a',{class:'btn',href:i.dsm_url,target:'_blank',rel:'noopener',title:'Opens DSM File Station at this folder'},'Show folder in File Station')),
+    i.viewable ? '' : el('p',{class:'mute small'},'Browsers cannot show this file type, so “Download / open” saves it to your PC — click it in your browser’s download list to open it with your own program.'),
+    el('div',{class:'actions',style:'justify-content:flex-end;margin-top:10px'}, el('button',{class:'btn',onclick:()=>m.remove()},'Close'))));
+  document.body.append(m);
+}
+
+/* ---------- boot ---------- */
+(async function(){
+  S.cfg = await api('/api/config');
+  $('#ver').textContent = 'v' + S.cfg.version;
+  document.title = 'ServerDedupe v' + S.cfg.version;
+  renderNav();
+  const {running} = await api('/api/status');
+  if(running) startPolling();
+  go(S.scanId ? 'results' : 'scan');
+})();
+</script>
+</body>
+</html>

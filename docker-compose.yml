@@ -1,0 +1,22 @@
+services:
+  serverdedupe:
+    build: .
+    container_name: serverdedupe
+    restart: unless-stopped
+    ports:
+      - "5081:5070"          # host port : app port. Change the left number if 5081 is taken.
+    environment:
+      TZ: UTC                # scheduled jobs use this clock, e.g. America/New_York
+      DATA_ROOT: /data
+      START_SUBDIR: ""       # folder the picker opens in, relative to /data (e.g. "photos")
+      HASH_WORKERS: "2"      # parallel file readers; raise on fast hardware, lower on small NAS boxes
+      ALLOW_PERMANENT_DELETE: "0"   # "1" adds a Delete permanently button (quarantine is safer)
+      # SMB_HOST: mynas      # server name shown in the Windows network paths (default: the address you browse with)
+      # DSM_PORT: "5000"     # Synology only: DSM port for the "Show in File Station" link
+      # APP_USER: admin      # optional login for the web page; set both of these
+      # APP_PASSWORD: change-me
+    volumes:
+      - ./appdata:/app/data  # scan results, hash cache, thumbnails
+      # What the app can see and change. Change the left side to your own folder(s).
+      # Narrow it (e.g. /volume1/photo:/data/photo) to limit what a mistake can touch.
+      - /path/to/your/files:/data

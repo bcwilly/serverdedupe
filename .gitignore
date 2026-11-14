@@ -1,0 +1,9 @@
+# runtime data: scan database, hash cache, thumbnails (contains your file paths)
+appdata/
+data/
+*.db
+*.db-wal
+*.db-shm
+__pycache__/
+*.pyc
+.env

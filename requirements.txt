@@ -1,0 +1,5 @@
+flask>=3.0,<4
+gunicorn>=22
+pillow>=10.3
+pillow-heif>=0.16
+numpy>=2.0

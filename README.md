@@ -1,0 +1,85 @@
+# ServerDedupe
+
+A self-hosted, web-based duplicate finder for servers and NAS boxes. It runs in Docker next to your files, scans them in
+place (no copying over the network), and you review and clean up the results from any browser.
+Developed and used daily on a Synology DS223j, but nothing in it requires Synology: it runs anywhere Docker does.
+
+## Features
+
+- **Scan types:** regular files, photos, videos, audio, empty folders, a video health check, and a large-files finder.
+- **Match methods:** exact content (SHA-256), same name / name + size, similar photos (resized, re-saved, converted, optionally mirrored or rotated),
+  similar videos (frame matching, ignores resolution, format and bitrate, optionally mirrored), same audio recording (fingerprint), same tags.
+- **Health check:** finds videos that are unreadable, cut off, or blank/black for a set time at the end or in the middle.
+- **Review tools:** side-by-side compare of photos, videos and PDFs; "why it matched"; resolution, bitrate, megapixels and date details; keyboard-driven viewer;
+  auto-select rules (newest, oldest, highest resolution, largest, copy in a chosen folder...); protected folders.
+- **Safe by design:** scans are read-only, removal goes to a restorable quarantine, every action re-checks the file first, and the last copy is never removed.
+- **Large files:** list the biggest files biggest-first, then remove, move, or compress them to 7z or zip (tested before the original is quarantined).
+- **Scheduled jobs**, a permanent **ignore list**, hash cache (re-scans only read new or changed files), hardlink replacement, move, CSV export.
+
+## Quick start
+
+Requires Docker with Compose.
+
+```bash
+git clone https://github.com/<your-account>/serverdedupe.git
+cd serverdedupe
+# edit docker-compose.yml: set the folder to scan (the last "volumes:" line) and your time zone
+docker compose up -d --build
+```
+
+Open `http://<server-address>:5081`.
+
+On Synology: Container Manager → Project → Create, point it at the folder holding `docker-compose.yml`, then Build/Start.
+
+## Configuration
+
+Set these under `environment:` in `docker-compose.yml`.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `TZ` | `UTC` | Clock used by scheduled jobs |
+| `DATA_ROOT` | `/data` | The in-container folder the app may see (keep in step with the volume mapping) |
+| `START_SUBDIR` | empty | Sub-folder (under `DATA_ROOT`) the folder picker opens in |
+| `HASH_WORKERS` | `2` | Parallel file readers. Raise on fast hardware, lower on small NAS boxes |
+| `ALLOW_PERMANENT_DELETE` | `0` | `1` adds a "Delete permanently" action (needs typed confirmation) |
+| `APP_USER`, `APP_PASSWORD` | unset | Optional HTTP login for the web page |
+| `SMB_HOST` | browser address | Server name shown in the Windows network paths in the file panel |
+| `DSM_PORT` | `5000` | Synology only: port for the "Show in File Station" link |
+
+## Safety and security
+
+- **Mount only what you want scanned.** The app can see and change everything under the folder you map to `/data`. Use a narrow mapping first, and keep a backup of anything irreplaceable.
+- **Quarantine, not delete.** "Move to quarantine" moves files into a hidden `.dedupe_trash` folder in the same shared folder (instant, restorable).
+- **Don't expose it to the internet.** There is no TLS. Set `APP_USER` / `APP_PASSWORD` and keep it on your LAN or behind a VPN or reverse proxy.
+- Symlinks are not followed. `@eaDir`, `#recycle`, `#snapshot` and `@tmp` are skipped by default.
+- Hardlinks only work inside one filesystem or share; cross-share replacements are reported as skipped.
+- Results live in `appdata/dedupe.db` (SQLite) and thumbnails in `appdata/thumbs`. Deleting scans in the app never touches your files.
+
+## Notes on the media features
+
+- The first video/audio scan reads details (and fingerprints for similar video / same recording) from every file. That is slow on big libraries and low-power hardware, but cached afterwards. Start with one folder.
+- "Same length" is a weak match: review those groups before removing anything.
+- Mirrored/rotated matching and the health check's full decode are slower, so they are off by default.
+- Video and audio features need ffmpeg, which the Docker image installs.
+
+## Updating
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+Your scan data in `appdata/` is kept.
+
+## Project layout
+
+`app.py` web server and API · `scanner.py` scan engine · `media.py` photo/video/audio details, fingerprints, health check · `actions.py` quarantine/link/move ·
+`db.py` SQLite schema · `ignores.py` ignore list · `emptyfolders.py` empty-folder tool · `schedule.py` scheduled jobs · `static/index.html` the UI.
+
+## Contributing
+
+Issues and pull requests are welcome. Please describe your platform (OS, Docker version, hardware) and attach the version shown in the page header when reporting a bug.
+
+## License
+
+MIT. See [LICENSE](LICENSE). Use at your own risk: this tool can move and delete files, so test on copies first.
