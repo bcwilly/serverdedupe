@@ -544,10 +544,21 @@ class Scanner(threading.Thread):
     def _large(self):
         sid, top = self.scan_id, max(10, min(5000, int(self.p.get("top_n") or 500)))
         self._progress("ranking the biggest files", 0, 0, force=True)
-        rows = self.conn.execute(
+        cand = self.conn.execute(
             "SELECT id,path,size,mtime_ns FROM files WHERE scan_id=? AND state='ok' AND id IN "
-            "(SELECT min(id) FROM files WHERE scan_id=? GROUP BY COALESCE(ikey, id)) ORDER BY size DESC LIMIT ?", (sid, sid, top)).fetchall()
-        for fid, path, size, mt in rows:        # one row per real file, so a mirrored path or hardlink is listed once
+            "(SELECT min(id) FROM files WHERE scan_id=? GROUP BY COALESCE(ikey, id)) ORDER BY size DESC LIMIT ?", (sid, sid, top * 3 + 50)).fetchall()
+        rows = []
+        for r in cand:        # one row per real file, so a mirrored path or hardlink is listed once
+            try:             # skip "files" that are mostly empty space: virtual files like /proc/kcore (128 TB) and sparse images
+                st = os.lstat(r[1])
+                if getattr(st, "st_blocks", None) is not None and st.st_blocks * 512 < st.st_size * 0.1:
+                    continue
+            except OSError:
+                continue
+            rows.append(r)
+            if len(rows) >= top:
+                break
+        for fid, path, size, mt in rows:
             kind, why = media.shrink_hint(path)
             self.conn.execute("INSERT OR REPLACE INTO health(scan_id,file_id,path,size,mtime_ns,kind,sev,reason,detail) VALUES(?,?,?,?,?,?,?,?,?)",
                               (sid, fid, path, size, mt, kind, 0, why, "{}"))

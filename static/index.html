@@ -27,6 +27,18 @@ nav{display:flex;gap:4px}
 nav button{background:none;border:0;color:var(--mute);padding:8px 14px;border-radius:8px;cursor:pointer;font:inherit}
 nav button.on{background:var(--panel2);color:var(--text)}
 main{max-width:1200px;margin:0 auto;padding:20px}
+html[data-size=m] main,html[data-size=m] #banner .in{max-width:1700px}
+html[data-size=l] main,html[data-size=l] #banner .in{max-width:2600px}
+html[data-size=m] body{zoom:1.1}
+html[data-size=l] body{zoom:1.25}
+#sizer{margin-left:auto;display:flex;gap:2px;align-items:center;font-size:11px;color:var(--mute)}
+#sizer button{background:var(--panel2);border:1px solid var(--line);color:var(--mute);padding:3px 9px;cursor:pointer;font:inherit;border-radius:6px}
+#sizer button.on{color:var(--text);border-color:var(--accent)}
+.f.ghost{opacity:.45}
+.f.ghost .nm b{text-decoration:line-through}
+.brow{display:flex;align-items:center;gap:10px;padding:4px 8px;border-bottom:1px solid var(--line);font-size:13px}
+.brow:hover{background:var(--panel2)}
+.brow .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
 .card h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--mute);margin:0 0 12px;font-weight:600}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
@@ -73,6 +85,7 @@ table{width:100%;border-collapse:collapse}
 th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line)}
 th{color:var(--mute);font-weight:500;font-size:12px}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:20;padding:20px}
+.modal.wide>div{max-width:1100px;width:100%}
 .modal>div{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;max-width:640px;width:100%;max-height:85vh;overflow:auto}
 .modal.img>div{max-width:92vw;width:auto;padding:8px}
 .modal.img img{max-width:88vw;max-height:80vh;display:block}
@@ -142,6 +155,7 @@ input[type=checkbox],input[type=range]{accent-color:var(--accent)}
 <header>
   <h1>Server<span>Dedupe</span> <small id="ver" style="font-size:11px;font-weight:400;color:var(--mute)"></small></h1>
   <nav id="nav"></nav>
+  <div id="sizer" title="Display size"></div>
 </header>
 <div id="banner" class="hide"></div>
 </div>
@@ -201,6 +215,11 @@ const TABS = [['scan','Scan'],['jobs','Schedule'],['results','Results'],['trash'
 
 function renderNav(){
   const n = $('#nav'); n.replaceChildren(...TABS.map(([k,l]) => el('button',{class:S.tab===k?'on':'',onclick:()=>go(k)},l)));
+}
+function setSize(k){
+  if(!['s','m','l'].includes(k)) k = 's';
+  document.documentElement.dataset.size = k; store.set('size',k);
+  $('#sizer').replaceChildren('Display ', ...[['s','Small'],['m','Medium'],['l','Large']].map(([v,l]) => el('button',{class:k===v?'on':'',title:l+' display',onclick:()=>setSize(v)},l)));
 }
 function go(tab){ S.tab=tab; S.refresh=null; renderNav(); ({scan:viewScan,jobs:viewJobs,results:viewResults,trash:viewTrash,history:viewHistory})[tab](); }
 
@@ -304,7 +323,7 @@ function viewScan(){
     el('div',{class:'mute small',style:'margin:4px 0 10px'},'Best for a scheduled job. Folders are removed with rmdir, so one with anything real in it is never touched. They are deleted for good, not quarantined. The folders you add here are never removed themselves; protected folders are skipped.'));
   f.top_n = el('input',{type:'number',min:10,max:5000,step:50,value:s.top_n||500,style:'width:110px'});
   const largeBox = el('div',{}, el('label',{},'List the biggest … files'), f.top_n,
-    el('div',{class:'mute small',style:'margin:4px 0 8px'},'Only files at or above the “Min size” below are considered. The default is 100 MB (102400 KB); lower it to see smaller files too. Compressing and moving files can be done from the results.'));
+    el('div',{class:'mute small',style:'margin:4px 0 8px'},'Only files at or above the “Min size” below are considered. The default is 100 MB (102400 KB); lower it to see smaller files too. Virtual and mostly-empty (sparse) files are skipped, since they take almost no real space. Compressing, moving and deleting can be done from the results.'));
   const matchBox = el('div',{}, el('label',{},'Match by'), mode);
   const fileBox = el('div',{},
     el('div',{class:'row'}, el('div',{},el('label',{},'Min size (KB)'),inp('min_kb','number')), el('div',{},el('label',{},'Max size (MB, optional)'),inp('max_mb','number'))),
@@ -364,6 +383,7 @@ function viewScan(){
     el('div',{class:'grid'},
       el('div',{class:'card'}, el('h2',{},'Folders to scan'), roots,
         el('button',{class:'btn',onclick:()=>pickFolder('Add folders to scan', ps => { ps.forEach(p => { if(!S.roots.find(r=>r.path===p)) S.roots.push({path:p,protected:false}); }); store.set('roots',S.roots); draw(); }, true)},'+ Add folders'),
+        el('button',{class:'btn',title:'Look inside the folders on the server, preview files, and move or delete a whole folder',style:'margin-left:6px',onclick:()=>browseFolder(null)},'📂 Browse folders'),
         el('p',{class:'mute small'},'Tick “Protected” on a folder you trust as the original. Its files are never selected for removal, and groups made only of protected files are hidden.')),
       el('div',{class:'card'}, el('h2',{},'Scan type'), tabs, hint,
         matchBox, imgBox, durBox, vidBox, flipBox, audBox, albumBox, healthBox, largeBox, warn, folderBox, fileBox,
@@ -968,20 +988,46 @@ async function viewHealth(sc){
   await load(true);
 }
 async function viewLarge(sc){
-  const m = $('#main'); let q = '', kind = '', loaded = 0, sum = null, top = 0, poll = null, seen = false;
+  const m = $('#main'); let q = '', kind = '', ext = '', loaded = 0, sum = null, top = 0, poll = null, seen = false;
   const chips = el('div',{class:'chips'}), list = el('div',{class:'card',style:'padding:0'});
   const more = el('button',{class:'btn hide',onclick:()=>load(false)},'Load more');
-  const filter = el('input',{type:'text',placeholder:'Filter by path…',style:'width:220px'});
+  const filter = el('input',{type:'text',placeholder:'Filter: name, folder, or *.pst;*.mov',title:'Type part of a name or folder, or use * as a wildcard: *.pst  or  *.pst;*.mov',style:'width:260px'});
   filter.onkeydown = e => { if(e.key==='Enter'){ q=filter.value; load(true); } };
   const KIND = {good:'Compresses well', maybe:'May compress', poor:'Already compressed'};
   const kindSel = el('select',{style:'width:auto',onchange:()=>{ kind = kindSel.value; load(true); }});
+  const extSel = el('select',{style:'width:auto',title:'Show only one kind of file',onchange:()=>{ ext = extSel.value; load(true); }});
   const mk = (t,c,fn) => el('button',{class:'btn '+c,onclick:fn},t);
   const has7z = !!S.cfg.sevenzip;
   const fmt = el('select',{style:'width:auto'}, el('option',{value:'7z',disabled:!has7z,selected:has7z},'7z (best compression)'+(has7z?'':' — not installed yet')), el('option',{value:'zip',selected:!has7z},'zip (opens anywhere)'));
   const level = el('select',{style:'width:auto'}, el('option',{value:'normal'},'Normal'), el('option',{value:'fast'},'Fast (less squeezing, easier on the NAS)'));
   const keep = el('input',{type:'checkbox'});
   const prog = el('div',{class:'hide',style:'margin:8px 0'});
+  const inst = el('button',{class:'btn',title:'Downloads and installs the 7z program inside this container (needs internet; takes a minute). Nothing else changes.',onclick:async()=>{
+    inst.disabled = true; inst.textContent = 'Installing 7z…';
+    try{
+      await api('/api/tools/7z/install',{});
+      for(let i=0;i<300;i++){
+        await new Promise(r=>setTimeout(r,2000));
+        const st = await api('/api/tools/7z/status');
+        if(!st.running){
+          if(st.installed){ S.cfg = await api('/api/config'); toast('7z is installed',5000); return viewLarge(sc); }
+          inst.disabled = false; inst.textContent = 'Install 7z'; toast('The install did not work. '+(st.log||'').slice(-300), 12000); return;
+        }
+      }
+    }catch(e){ inst.disabled = false; inst.textContent = 'Install 7z'; toast(e.message, 8000); }
+  }},'Install 7z');
   S.refresh = () => load(true);
+  const GHOST = {trashed:'quarantined', moved:'moved', deleted:'deleted', compressed:'compressed'};
+  function ghostRows(test, state){
+    list.querySelectorAll('.f[data-path]').forEach(r => {
+      if(r.classList.contains('ghost') || !test(r)) return;
+      r.classList.add('ghost'); r.classList.remove('sel');
+      const cb = r.querySelector('input[type=checkbox]'); if(cb){ cb.checked = false; cb.disabled = true; }
+      r.querySelectorAll('.badge').forEach(x=>x.remove());
+      const last = r.lastElementChild; if(last) last.append(el('span',{class:'badge',style:'color:var(--danger)'}, GHOST[state]||state));
+    });
+  }
+  async function resum(){ try{ sum = (await api(`/api/scans/${sc.id}/health?offset=0&limit=1`)).summary; draw(); }catch(e){} }
   function draw(){
     if(!sum) return;
     chips.replaceChildren(el('div',{class:'chip'},el('b',{},sum.listed.toLocaleString()),'big files listed'),
@@ -989,13 +1035,16 @@ async function viewLarge(sc){
       el('div',{class:'chip sel'},el('b',{},sum.selected.toLocaleString()+' · '+fmtSize(sum.selected_bytes)),'selected'),
       sum.handled ? el('div',{class:'chip'},el('b',{},sum.handled.toLocaleString()),'moved / quarantined') : '');
     const cur = kindSel.value;
-    kindSel.replaceChildren(el('option',{value:''},'All file types'), ...['good','maybe','poor'].filter(k=>sum.kinds[k]).map(k => el('option',{value:k,selected:k===cur},`${KIND[k]} (${sum.kinds[k]})`)));
+    const curE = extSel.value, es = Object.entries(sum.exts||{}).filter(x=>x[0]).sort((a,b)=>b[1][1]-a[1][1]);
+    if(curE && !es.find(x=>x[0]===curE)){ ext = ''; }
+    extSel.replaceChildren(el('option',{value:''},'All file types ('+es.length+')'), ...es.map(([e,v]) => el('option',{value:e,selected:e===ext},`${e?'.'+e:'(no extension)'} · ${v[0].toLocaleString()} · ${fmtSize(v[1])}`)));
+    kindSel.replaceChildren(el('option',{value:''},'Any compression'), ...['good','maybe','poor'].filter(k=>sum.kinds[k]).map(k => el('option',{value:k,selected:k===cur},`${KIND[k]} (${sum.kinds[k]})`)));
   }
   async function bulk(selected){ try{ sum = (await api('/api/scans/'+sc.id+'/health/select',{selected,q,kind})).summary; draw(); load(true); }catch(e){ toast(e.message) } }
   async function pickTop(n){
     try{
       await api('/api/scans/'+sc.id+'/health/select',{selected:false,q,kind});
-      const d = await api(`/api/scans/${sc.id}/health?offset=0&limit=${n}&q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}`);
+      const d = await api(`/api/scans/${sc.id}/health?offset=0&limit=${n}&q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}&ext=${encodeURIComponent(ext)}`);
       sum = (await api('/api/scans/'+sc.id+'/health/select',{ids:d.files.filter(f=>!f.protected).map(f=>f.id),selected:true})).summary; draw(); load(true);
     }catch(e){ toast(e.message) }
   }
@@ -1003,13 +1052,26 @@ async function viewLarge(sc){
     if(!sum || !sum.selected) return toast('Nothing selected');
     const run = async dest => {
       try{
-        const r = await api('/api/scans/'+sc.id+'/health/act',{action,dest}); sum = r.summary; draw(); load(true);
-        toast(`${r.done} ${action==='trash'?'sent to quarantine':'moved'}, ${r.skipped} skipped`, 6000); if(r.errors.length) showErrors(r.errors);
+        const r = await api('/api/scans/'+sc.id+'/health/act',{action,dest}); sum = r.summary; draw();
+        if(r.skipped) load(true); else ghostRows(x => { const c = x.querySelector('input[type=checkbox]'); return c && c.checked; }, action==='trash'?'trashed':action==='delete'?'deleted':'moved');
+        toast(`${r.done} ${action==='trash'?'sent to quarantine':action==='delete'?'deleted':'moved'}, ${r.skipped} skipped`, 6000); if(r.errors.length) showErrors(r.errors);
       }catch(e){ toast(e.message, 8000) }
     };
     if(action==='trash'){ if(confirm(`Move ${sum.selected.toLocaleString()} files (${fmtSize(sum.selected_bytes)}) to the quarantine?\nThey can be restored from the Quarantine tab until you purge them.`)) run(); }
+    else if(action==='delete') run();
     else pickFolder('Move selected files to…', p => { if(confirm(`Move ${sum.selected.toLocaleString()} files to\n${p}?`)) run(p); });
   }
+  let delTimer = null;
+  const delBtn = el('button',{class:'btn',style:'border-color:var(--danger);color:var(--danger)',title:'Delete the selected files for good. They do NOT go to the quarantine and cannot be restored.',onclick:()=>{
+    if(!sum || !sum.selected) return toast('Nothing selected');
+    if(delTimer){                                   // second click: do it
+      clearTimeout(delTimer); delTimer = null; resetDel(); act('delete'); return;
+    }
+    delBtn.className = 'btn danger'; delBtn.style.cssText = '';
+    delBtn.textContent = `Click again to delete ${sum.selected.toLocaleString()} file${sum.selected===1?'':'s'} (${fmtSize(sum.selected_bytes)}) for good`;
+    delTimer = setTimeout(()=>{ delTimer = null; resetDel(); }, 7000);
+  }},'Delete permanently');
+  function resetDel(){ delBtn.className = 'btn'; delBtn.style.cssText = 'border-color:var(--danger);color:var(--danger)'; delBtn.textContent = 'Delete permanently'; }
   async function compress(){
     if(!sum || !sum.selected) return toast('Nothing selected');
     try{ await api('/api/scans/'+sc.id+'/health/compress',{format:fmt.value,level:level.value,keep:keep.checked}); toast('Compression started. It runs in the background; you can leave this page.'); watch(); }
@@ -1024,8 +1086,21 @@ async function viewLarge(sc){
     if(!document.body.contains(chips)){ clearInterval(poll); poll = null; return; }       // left this page
     if(st.running){
       prog.classList.remove('hide');
-      prog.replaceChildren(el('div',{class:'warnbar'}, el('b',{},`Compressing ${st.done+st.failed+1} of ${st.total}: `), el('span',{class:'mute',style:'word-break:break-all'}, st.current||'…'),
-        el('span',{style:'flex:1'}), mk('Cancel','',()=>api('/api/compress/cancel',{}))));
+      const tb = st.total_bytes || 0, cur = st.cur_size || 0;
+      const phaseFrac = st.cur_pct==null ? 0 : st.cur_phase==='testing' ? 0.9+0.1*st.cur_pct/100 : st.cur_phase==='finishing' ? 1 : 0.9*st.cur_pct/100;
+      const doneB = (st.done_bytes||0) + cur*phaseFrac;
+      const pct = tb ? Math.min(100, doneB*100/tb) : 0;
+      const el_s = Math.max(1, (st.now||0) - (st.started||0));
+      const eta = (pct>3 && doneB>0) ? Math.round(el_s*(tb-doneB)/doneB) : null;
+      const etaTxt = eta==null ? 'working out the time left…' : eta<90 ? 'about '+eta+' seconds left' : 'about '+Math.round(eta/60)+' min left';
+      const phaseTxt = {compressing:'Compressing',testing:'Testing the archive',finishing:'Finishing up',starting:'Starting'}[st.cur_phase] || 'Working';
+      const bar = (w,h,ind) => el('div',{style:`height:${h}px;background:var(--bg);border-radius:6px;overflow:hidden;margin:4px 0`}, el('div',{style:`height:100%;width:${w}%;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .5s`+(ind?';opacity:.55':'')}));
+      prog.replaceChildren(el('div',{class:'warnbar',style:'display:block'},
+        el('div',{style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap'}, el('b',{},`Compressing file ${Math.min(st.total, st.done+st.failed+1)} of ${st.total}`),
+          el('span',{class:'mute'},`${pct.toFixed(0)}% · ${fmtSize(doneB)} of ${fmtSize(tb)} · ${etaTxt}`), el('span',{style:'flex:1'}), mk('Cancel','',()=>api('/api/compress/cancel',{}))),
+        bar(pct.toFixed(1),12,false),
+        el('div',{class:'mute small',style:'word-break:break-all'}, `${phaseTxt}: ${st.current||'…'} (${fmtSize(cur)})`+(st.cur_pct!=null?` · ${st.cur_pct}%`:'')),
+        bar(st.cur_pct==null ? 100 : (phaseFrac*100).toFixed(0), 5, st.cur_pct==null)));
     } else {
       clearInterval(poll); poll = null;
       prog.replaceChildren(el('div',{class:'warnbar'}, el('b',{},`Compression finished: ${st.done} done`+(st.failed?`, ${st.failed} skipped`:'')),
@@ -1035,7 +1110,7 @@ async function viewLarge(sc){
   }
   async function load(reset){
     if(reset){ loaded = 0; list.replaceChildren(); }
-    const d = await api(`/api/scans/${sc.id}/health?offset=${loaded}&limit=100&q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}`);
+    const d = await api(`/api/scans/${sc.id}/health?offset=${loaded}&limit=100&q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}&ext=${encodeURIComponent(ext)}`);
     sum = d.summary; draw();
     if(reset) top = d.files.length ? d.files[0].size : top;
     d.files.forEach(f => {
@@ -1044,14 +1119,16 @@ async function viewLarge(sc){
       const i = f.path.lastIndexOf('/'), pct = top ? Math.max(2, Math.round(f.size*100/top)) : 100;
       const col = f.kind==='good' ? 'var(--ok)' : f.kind==='poor' ? 'var(--mute)' : 'var(--warn)';
       const ext = (f.path.match(/\.([^./]+)$/)||[])[1];
-      list.append(el('div',{class:'f'+(f.selected?' sel':'')},
+      list.append(el('div',{class:'f'+(f.selected?' sel':''),'data-path':f.path},
         cb, el('div',{class:'ph',style:'display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--mute)'}, ext ? ext.toUpperCase().slice(0,5) : ''),
         el('div',{class:'nm',title:f.path}, el('b',{class:'link',title:'Click to open this file',onclick:()=>showFile({id:f.fid,path:f.path,kind:'other',size:f.size,mtime:f.mtime})}, f.path.slice(i+1)), el('span',{}, '‎'+f.path.slice(0,i)),
           el('span',{style:'display:block;color:'+col}, f.reason),
           el('span',{style:`display:block;height:4px;margin-top:4px;border-radius:2px;width:${pct}%;background:var(--accent,#6366f1);opacity:.7`})),
         el('div',{style:'font-weight:600'}, fmtSize(f.size)),
         el('div',{class:'mute'}, fmtDate(f.mtime)),
-        el('div',{style:'display:flex;gap:6px;justify-content:flex-end'}, f.protected ? el('span',{class:'badge prot'},'protected') : '',
+        el('div',{style:'display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap'}, f.protected ? el('span',{class:'badge prot'},'protected') : '',
+          el('button',{class:'btn sm',title:'Play or view this file',onclick:()=>showFile({id:f.fid,path:f.path,kind:'other',size:f.size,mtime:f.mtime})},'Preview'),
+          el('button',{class:'btn sm',title:'Browse the folder this file is in',onclick:()=>browseFolder(f.path.slice(0,i), sc, s2 => { sum = s2; draw(); load(true); }, (path, state) => { ghostRows(r => r.dataset.path.startsWith(path+'/'), state); resum(); })},'📁 Folder'),
           el('span',{class:'badge',style:'color:'+col},KIND[f.kind]||f.kind))));
     });
     loaded += d.files.length;
@@ -1062,9 +1139,10 @@ async function viewLarge(sc){
     el('div',{class:'mute small',style:'margin-bottom:8px'}, `Scan #${sc.id} · Large files · ${fmtDate(sc.started)} · ${sc.stats.files?.toLocaleString()} files looked at in ${sc.stats.seconds}s · biggest first · ${sc.params.min_kb>=1024 ? 'at least '+fmtSize(sc.params.min_kb*1024) : 'min size '+sc.params.min_kb+' KB'}`),
     chips,
     el('div',{class:'toolbar'}, mk('Select all','primary',()=>bulk(true)), mk('Clear selection','',()=>bulk(false)),
-      mk('Select the 10 biggest','',()=>pickTop(10)), kindSel, el('span',{style:'flex:1'}), filter),
-    el('div',{class:'toolbar'}, mk('Move to quarantine','danger',()=>act('trash')), mk('Move to folder…','',()=>act('move'))),
-    el('div',{class:'toolbar'}, el('b',{},'Compress selected:'), fmt, level,
+      mk('Select the 10 biggest','',()=>pickTop(10)), extSel, kindSel, el('span',{style:'flex:1'}), filter),
+    el('div',{class:'toolbar'}, mk('Move to quarantine','danger',()=>act('trash')), mk('Move to folder…','',()=>act('move')), delBtn,
+      el('span',{class:'mute small'}, 'Delete permanently skips the quarantine and cannot be undone (you will be asked to click once more to confirm).')),
+    el('div',{class:'toolbar'}, el('b',{},'Compress selected:'), fmt, has7z ? '' : inst, level,
       el('label',{style:'display:flex;gap:6px;align-items:center;color:var(--text)',title:'Leave the original where it is as well as the new archive. Off by default: the original is moved to the quarantine so you can restore it.'}, keep, 'Keep the original too'),
       mk('Compress','primary',compress),
       el('span',{class:'mute small'}, 'Makes “name.7z” (or .zip) beside each file, tests it, then moves the original to quarantine. Slow on a NAS, so it runs in the background. Photos, video, music and zips barely shrink.')),
@@ -1298,13 +1376,132 @@ async function showEmpty(f){
     el('div',{class:'actions',style:'justify-content:flex-end;margin-top:10px'}, el('button',{class:'btn',onclick:()=>m.remove()},'Close'))));
   document.body.append(m);
 }
+
+/* ---------- preview (video, pictures, audio, PDF) and folder browser ---------- */
+function mediaKindByName(n){
+  const e = ((n.match(/\.([^.]+)$/)||[])[1]||'').toLowerCase();
+  if(['mp4','m4v','mov','webm','mkv','avi','wmv','mpg','mpeg','ts','m2ts','3gp','flv','mts'].includes(e)) return 'video';
+  if(['mp3','m4a','flac','wav','ogg','aac','wma','opus'].includes(e)) return 'audio';
+  if(['jpg','jpeg','png','gif','webp','bmp','heic','heif','tif','tiff'].includes(e)) return 'img';
+  if(e==='pdf') return 'pdf';
+  return null;
+}
+function previewEl(name, raw, thumb){
+  const k = mediaKindByName(name); if(!k) return null;
+  const warn = el('div',{class:'mute small hide',style:'margin-top:4px'},'Your browser cannot play this format directly (common for mkv, avi, wmv). The picture is a still frame; use Download to open it in your own player.');
+  let node;
+  if(k==='video'){ node = el('video',{controls:true,preload:'metadata',poster:thumb,src:raw,style:'width:100%;max-height:62vh;background:#000;border-radius:8px'}); node.onerror = () => warn.classList.remove('hide'); }
+  else if(k==='audio'){ node = el('audio',{controls:true,preload:'metadata',src:raw,style:'width:100%'}); node.onerror = () => warn.classList.remove('hide'); }
+  else if(k==='img'){ node = el('img',{src:thumb,style:'max-width:100%;max-height:62vh;display:block;margin:0 auto;border-radius:6px'}); }
+  else { node = el('iframe',{src:raw+(raw.includes('?')?'&':'?')+'x=1#view=FitH',style:'width:100%;height:62vh;border:0;background:#fff;border-radius:6px'}); }
+  return el('div',{style:'margin:10px 0'}, node, warn);
+}
+function browseFolder(start, sc, onSel, onGone){
+  const m = el('div',{class:'modal wide',onclick:e=>{ if(e.target===m) m.remove(); }});
+  const box = el('div',{}); m.append(box); document.body.append(m);
+  let cur = null, armed = null, info = null;
+  const stat = n => `${n.files.toLocaleString()} files, ${n.folders.toLocaleString()} sub-folders, ${fmtSize(n.bytes)}${n.partial?' (still counting when stopped, so at least this much)':''}`;
+  async function load(p){
+    let d; try{ d = await api('/api/ls'+(p?'?path='+encodeURIComponent(p):'')); }catch(e){ toast(e.message, 6000); if(cur===null) m.remove(); return; }
+    cur = d.path; armed = null; info = null;
+    const pv = el('div',{});
+    const sizeLine = el('div',{class:'mute small',style:'min-height:18px'});
+    const bsz = el('button',{class:'btn sm',title:'Counts everything inside this folder (can take a while on big folders)',onclick:async()=>{
+      bsz.disabled = true; sizeLine.textContent = 'Counting…';
+      try{ info = await api('/api/foldersize?path='+encodeURIComponent(cur)); sizeLine.textContent = 'This folder holds '+stat(info); }catch(e){ sizeLine.textContent = e.message; }
+      bsz.disabled = false; }},'How big is this folder?');
+    const watchJob = async (what, msg) => {
+      const stats = n => `${n.files.toLocaleString()}${n.total_files?' of '+n.total_files.toLocaleString():''} files · ${fmtSize(n.bytes)}${n.total_bytes?' of '+fmtSize(n.total_bytes):''}`;
+      for(;;){
+        await new Promise(r=>setTimeout(r,1000));
+        let t; try{ t = await api('/api/folder/status'); }catch(e){ continue; }
+        if(t.running){
+          const pc = t.total_bytes ? Math.min(100, t.bytes*100/t.total_bytes) : null;
+          sizeLine.replaceChildren(el('div',{class:'warnbar',style:'display:block'},
+            el('b',{}, t.phase==='counting' ? 'Counting what is inside…' : t.phase==='deleting' ? 'Deleting… ' : t.phase==='moving' ? 'Moving… ' : 'Working… '),
+            t.phase==='deleting' ? el('span',{class:'mute'}, stats(t)+(pc!=null?` · ${pc.toFixed(0)}%`:'')) : '',
+            t.phase==='deleting' ? el('div',{style:'height:10px;background:var(--bg);border-radius:6px;overflow:hidden;margin-top:6px'}, el('div',{style:`height:100%;width:${pc==null?100:pc.toFixed(1)}%;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .5s`})) : ''));
+          continue;
+        }
+        sizeLine.replaceChildren();
+        if(t.ok){
+          toast(msg(t)+(t.warn?'  '+t.warn:''), 9000);
+          if(onGone) onGone(t.path, t.state);
+          load(d.parent);
+        } else { toast(t.error||'The folder job failed', 12000); load(cur); }
+        return;
+      }
+    };
+    const run = async (body, msg) => {
+      try{ await api('/api/folder/act', body); }catch(e){ return toast(e.message, 9000); }
+      [bsz,bq,bm,bd].forEach(x=>x.disabled=true);
+      watchJob(body.action, msg);
+    };
+    const bq = el('button',{class:'btn',title:'Moves the whole folder to the quarantine. Restore it from the Quarantine tab.',onclick:()=>
+      run({path:cur,action:'trash'}, t=>'Folder sent to the quarantine ('+fmtSize(t.bytes)+'). Restore it from the Quarantine tab.')},'Move folder to quarantine');
+    const bm = el('button',{class:'btn',onclick:()=>pickFolder('Move this whole folder to…', dest =>
+      run({path:cur,action:'move',dest}, t=>'Moved to '+t.target))},'Move folder to…');
+    let dt = null;
+    const bd = el('button',{class:'btn',style:'border-color:var(--danger);color:var(--danger)',title:'Deletes this folder and everything in it for good. It does NOT go to the quarantine.'},'Delete folder permanently');
+    const reset = () => { dt = null; bd.className = 'btn'; bd.style.cssText = 'border-color:var(--danger);color:var(--danger)'; bd.textContent = 'Delete folder permanently'; bd.disabled = false; };
+    bd.onclick = async () => {
+      if(dt){ clearTimeout(dt); reset(); run({path:cur,action:'delete'}, t=>`Deleted the folder (${t.files.toLocaleString()} files, ${fmtSize(t.bytes)} freed).`); return; }
+      bd.disabled = true; bd.textContent = 'Counting what is inside…';
+      try{ info = info || await api('/api/foldersize?path='+encodeURIComponent(cur)); }catch(e){ reset(); return toast(e.message); }
+      bd.disabled = false; bd.className = 'btn danger'; bd.style.cssText = '';
+      bd.textContent = `Click again to delete ${info.files.toLocaleString()} files (${fmtSize(info.bytes)}) for good`;
+      dt = setTimeout(reset, 8000);
+    };
+    const rows = [];
+    d.dirs.forEach(x => rows.push(el('div',{class:'brow'}, el('span',{},'📁'), el('div',{class:'nm',onclick:()=>load(d.path+'/'+x.name)}, x.name))));
+    d.files.forEach(f => {
+      const full = d.path+'/'+f.name, k = mediaKindByName(f.name);
+      rows.push(el('div',{class:'brow'}, el('span',{}, k==='video'?'🎞':k==='img'?'🖼':k==='audio'?'♪':k==='pdf'?'📕':'📄'),
+        el('div',{class:'nm',title:full,onclick:()=>openOne(f,full)}, f.name),
+        el('span',{class:'mute small'}, fmtSize(f.size)), el('span',{class:'mute small'}, fmtDate(f.mtime)),
+        el('button',{class:'btn sm',onclick:()=>openOne(f,full)}, k ? 'Preview' : 'Details')));
+    });
+    function openOne(f, full){
+      const raw = '/api/rawpath?path='+encodeURIComponent(full), th = '/api/thumbpath?s=1200&path='+encodeURIComponent(full);
+      pv.replaceChildren(el('div',{style:'border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:10px'},
+        el('div',{style:'display:flex;gap:8px;align-items:center'}, el('b',{style:'word-break:break-all'}, f.name), el('span',{class:'mute small'}, fmtSize(f.size)), el('span',{style:'flex:1'}),
+          el('a',{class:'btn sm',href:raw+'&dl=1'},'Download'), el('button',{class:'btn sm',onclick:()=>pv.replaceChildren()},'Close preview')),
+        previewEl(f.name, raw, th) || el('div',{class:'mute small',style:'margin:8px 0'},'Browsers cannot show this type of file. Download it to open it with your own program.')));
+      pv.scrollIntoView({block:'nearest'});
+    }
+    const sub = el('input',{type:'checkbox',checked:true,id:'bsub'});
+    const doSel = async on => {
+      try{ const r = await api('/api/scans/'+sc.id+'/health/select',{selected:on,under:cur,sub:sub.checked});
+        selMsg.textContent = r.changed ? `${on?'Ticked':'Unticked'} ${r.changed.toLocaleString()} listed file${r.changed===1?'':'s'}. Now ${r.summary.selected.toLocaleString()} selected (${fmtSize(r.summary.selected_bytes)}).` : 'No listed files in this folder'+(sub.checked?' (or below it)':'')+' to change.';
+        if(onSel) onSel(r.summary); }catch(e){ toast(e.message, 6000) } };
+    const selMsg = el('span',{class:'mute small'});
+    const selBar = sc ? el('div',{style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0;padding:8px;border:1px solid var(--line);border-radius:8px'},
+      el('b',{},'Tick boxes in the results list:'), el('button',{class:'btn sm primary',onclick:()=>doSel(true)},'Select all in this folder'), el('button',{class:'btn sm',onclick:()=>doSel(false)},'Unselect all in this folder'),
+      el('label',{style:'display:flex;gap:4px;align-items:center;margin:0'}, sub, 'include sub-folders'), selMsg) : '';
+    const parts = d.path.split('/').filter(Boolean);
+    box.replaceChildren(
+      el('h2',{style:'margin-top:0'},'Browse folder'),
+      el('div',{style:'display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px'},
+        d.parent ? el('button',{class:'btn sm',onclick:()=>load(d.parent)},'↑ Up') : '', el('span',{class:'mono',style:'word-break:break-all'}, d.path)),
+      d.can_act ? el('div',{class:'actions',style:'margin:8px 0'}, bsz, bq, bm, bd) : el('div',{class:'mute small',style:'margin:6px 0'},'This is a shared folder. Open a folder inside it to move or delete a whole folder.'),
+      sizeLine,
+      selBar,
+      el('div',{style:'max-height:42vh;overflow:auto;border:1px solid var(--line);border-radius:8px;margin-top:6px'}, ...(rows.length ? rows : [el('div',{class:'empty'},'This folder is empty')]), d.more ? el('div',{class:'mute small',style:'padding:6px 10px'},'… more items than can be shown'):''),
+      pv,
+      el('div',{class:'actions',style:'justify-content:flex-end;margin-top:10px'}, el('button',{class:'btn',onclick:()=>m.remove()},'Close')));
+  }
+  load(start);
+}
 async function showFile(f){
   let i; try{ i = await api('/api/fileinfo/'+f.id); }catch(e){ return toast('That file is no longer there — it may have been moved or deleted since the scan.', 6000); }
   const m = el('div',{class:'modal',onclick:e=>{ if(e.target===m) m.remove(); }});
   const cp = (txt, label) => async () => { toast((await copyText(txt)) ? label+' copied' : 'Could not copy — select the text and press Ctrl+C'); };
+  const pvw = previewEl(i.name, '/api/raw/'+f.id, '/api/thumb/'+f.id+'?s=1200');
+  if(pvw) m.classList.add('wide');
   m.append(el('div',{},
     el('h2',{style:'margin-top:0;word-break:break-all'}, i.name),
     el('div',{class:'mute small'}, fmtSize(i.size)+' · modified '+fmtDate(i.mtime)),
+    pvw || '',
     el('label',{},'Windows network path (paste into File Explorer’s address bar to open it in its normal program)'), el('div',{class:'mono'}, i.unc),
     el('label',{},'On the NAS'), el('div',{class:'mono'}, i.nas_path),
     el('div',{class:'actions',style:'margin-top:6px'},
@@ -1312,6 +1509,7 @@ async function showFile(f){
       el('a',{class:'btn'+(i.viewable?'':' primary'),href:'/api/raw/'+f.id+'?dl=1'}, i.viewable?'Download':'Download / open'),
       el('button',{class:'btn',onclick:cp(i.unc,'Windows path')},'Copy Windows path'),
       el('button',{class:'btn',onclick:cp(i.unc_folder,'Folder path')},'Copy folder path'),
+      el('button',{class:'btn',title:'Look inside this file\'s folder; you can move or delete the whole folder from there',onclick:()=>{ m.remove(); browseFolder(i.path.slice(0,i.path.lastIndexOf('/'))); }},'Browse this folder'),
       el('button',{class:'btn',title:'Move this file to another folder on the server',onclick:()=>pickFolder('Move this file to…', async p => {
         try{ const r = await api('/api/files/'+f.id+'/move',{dest:p}); m.remove(); toast('Moved to '+r.target, 6000); if(S.refresh) S.refresh(); }
         catch(e){ toast(e.message, 7000) } })},'Move to folder…'),
@@ -1326,7 +1524,7 @@ async function showFile(f){
   S.cfg = await api('/api/config');
   $('#ver').textContent = 'v' + S.cfg.version;
   document.title = 'ServerDedupe v' + S.cfg.version;
-  renderNav();
+  renderNav(); setSize(store.get('size','s'));
   const {running} = await api('/api/status');
   if(running) startPolling();
   go(S.scanId ? 'results' : 'scan');

@@ -1,12 +1,13 @@
 """ServerDedupe - duplicate file finder web app (Flask + SQLite)."""
 
-VERSION = "1.6.0"   # shown in the page header
+VERSION = "1.7.5"   # shown in the page header
 import csv
 import hashlib
 import io
 import itertools
 import json
 import os
+import re
 import mimetypes
 import threading
 import time
@@ -25,8 +26,8 @@ import scanner
 DATA_ROOT = os.path.realpath(os.environ.get("DATA_ROOT", "/data"))
 TRASH_NAME = os.environ.get("TRASH_NAME", ".dedupe_trash")
 SMB_HOST = os.environ.get("SMB_HOST", "")        # name shown in Windows network paths; default = host in your browser address
-DSM_PORT = os.environ.get("DSM_PORT", "5000")
 START_SUBDIR = os.environ.get("START_SUBDIR", "")   # folder picker opens here (relative to DATA_ROOT); empty = the root
+START_SUBDIR = os.environ.get("START_SUBDIR", "homes")   # folder picker opens here (relative to DATA_ROOT)
 _start = os.path.join(DATA_ROOT, START_SUBDIR)
 START_PATH = _start if os.path.isdir(_start) else DATA_ROOT
 ALLOW_PERM = os.environ.get("ALLOW_PERMANENT_DELETE", "0") == "1"
@@ -45,8 +46,14 @@ _lock = threading.Lock()
 _current = None
 
 
+_fold = {"running": False, "action": "", "path": "", "phase": "", "files": 0, "bytes": 0, "total_files": 0, "total_bytes": 0,
+         "ok": None, "error": "", "warn": "", "state": "", "target": "", "id": 0}
+
+
 def busy():
-    """True while a scan thread is still working (waits briefly for one that is just finishing)."""
+    """True while a scan thread is still working (waits briefly for one that is just finishing), or a folder job is running."""
+    if _fold["running"]:
+        return True
     if _current is not None and _current.is_alive():
         _current.join(2)
         return _current.is_alive()
@@ -79,6 +86,17 @@ def _auth():
 
 def err(msg, code=400):
     return jsonify(error=msg), code
+
+
+@app.errorhandler(Exception)
+def unexpected(e):
+    """Show a readable message (and put the traceback in the container log) instead of a bare 'INTERNAL SERVER ERROR'."""
+    from werkzeug.exceptions import HTTPException
+    if isinstance(e, HTTPException):
+        return e
+    import traceback
+    traceback.print_exc()
+    return jsonify(error=f"Server error in {request.path}: {type(e).__name__}: {e}"), 500
 
 
 def under_root(p):
@@ -608,6 +626,41 @@ def _like_arg(q):
     return "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
 
+def _path_filter(col, q):
+    """SQL for the path filter box. Plain text = contains. * and ? are wildcards (*.pst). ; or , or | separate alternatives."""
+    terms = [t.strip() for t in re.split(r"[;,|]", q) if t.strip()]
+    if not terms:
+        return "", []
+    parts, args = [], []
+    for t in terms:
+        esc = t.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        if "*" in t or "?" in t:
+            pat = esc.replace("*", "%").replace("?", "_")
+        else:
+            pat = "%" + esc + "%"
+        parts.append(f"{col} LIKE ? ESCAPE '\\'")
+        args.append(pat)
+    return " AND (" + " OR ".join(parts) + ")", args
+
+
+def _health_filters(q, kind, ext, pre="", under="", sub=True):
+    sql, args = _path_filter(pre + "path", q or "")
+    if under:
+        pfx = under.rstrip("/") + "/"
+        sql += f" AND substr({pre}path,1,?)=?"
+        args += [len(pfx), pfx]
+        if not sub:
+            sql += f" AND instr(substr({pre}path,?),'/')=0"
+            args.append(len(pfx) + 1)
+    if kind:
+        sql += f" AND {pre}kind=?"
+        args.append(kind)
+    if ext:
+        sql += f" AND lower({pre}path) LIKE ? ESCAPE '\\'"
+        args.append("%." + ext.lower().lstrip(".").replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_"))
+    return sql, args
+
+
 def empties_summary(sid):
     r = get_db().execute("SELECT count(*) n, coalesce(sum(state='ok'),0) ok, coalesce(sum(state='removed'),0) removed, "
                          "coalesce(sum(selected=1 AND state='ok'),0) sel FROM empties WHERE scan_id=?", (sid,)).fetchone()
@@ -635,6 +688,7 @@ def select_empties(sid):
     b = request.get_json(force=True, silent=True) or {}
     sel = 1 if b.get("selected", True) else 0
     c = get_db()
+    changed = 0
     if b.get("ids"):
         ids = [int(i) for i in b["ids"]]
         for i in range(0, len(ids), 500):
@@ -664,13 +718,20 @@ def remove_empties(sid):
 # ------------------------------------------------------------ health check results
 def health_summary(sid):
     r = get_db().execute(
-        "SELECT count(*) n, coalesce(sum(state='ok'),0) ok, coalesce(sum(state IN ('trashed','moved','compressed')),0) gone, "
+        "SELECT count(*) n, coalesce(sum(state='ok'),0) ok, coalesce(sum(state IN ('trashed','moved','compressed','deleted')),0) gone, "
         "coalesce(sum(selected=1 AND state='ok'),0) sel, coalesce(sum(CASE WHEN selected=1 AND state='ok' THEN size END),0) selbytes, "
         "coalesce(sum(CASE WHEN state='ok' THEN size END),0) bytes FROM health WHERE scan_id=?", (sid,)).fetchone()
     kinds = {k["kind"]: k["n"] for k in get_db().execute(
         "SELECT kind, count(*) n FROM health WHERE scan_id=? AND state='ok' GROUP BY kind", (sid,))}
+    exts = {}
+    for row in get_db().execute("SELECT path,size FROM health WHERE scan_id=? AND state='ok'", (sid,)):
+        nm = row["path"].rsplit("/", 1)[-1]
+        e = nm.rsplit(".", 1)[-1].lower() if "." in nm.strip(".") else ""
+        v = exts.setdefault(e, [0, 0])
+        v[0] += 1
+        v[1] += row["size"]
     return {"total": r["n"], "listed": r["ok"], "handled": r["gone"], "selected": r["sel"],
-            "selected_bytes": r["selbytes"], "bytes": r["bytes"], "kinds": kinds}
+            "selected_bytes": r["selbytes"], "bytes": r["bytes"], "kinds": kinds, "exts": exts}
 
 
 @app.get("/api/scans/<int:sid>/health")
@@ -680,15 +741,13 @@ def list_health(sid):
     lim = max(1, min(300, request.args.get("limit", 100, int)))
     q = (request.args.get("q") or "").strip()
     kind = (request.args.get("kind") or "").strip()
+    ext = (request.args.get("ext") or "").strip()
     sql = ("SELECT h.id,h.file_id,h.path,h.size,h.mtime_ns,h.kind,h.sev,h.reason,h.detail,h.selected,COALESCE(f.protected,0) prot "
            "FROM health h LEFT JOIN files f ON f.id=h.file_id WHERE h.scan_id=? AND h.state='ok'")
     args = [sid]
-    if q:
-        sql += " AND h.path LIKE ? ESCAPE '\\'"
-        args.append(_like_arg(q))
-    if kind:
-        sql += " AND h.kind=?"
-        args.append(kind)
+    fs, fa = _health_filters(q, kind, ext, "h.")
+    sql += fs
+    args += fa
     rows = get_db().execute(sql + " ORDER BY h.sev DESC, h.size DESC, h.path LIMIT ? OFFSET ?", (*args, lim, off)).fetchall()
     out = []
     for r in rows:
@@ -709,24 +768,22 @@ def select_health(sid):
     sel = 1 if b.get("selected", True) else 0
     c = get_db()
     free = "(file_id IS NULL OR file_id NOT IN (SELECT id FROM files WHERE scan_id=? AND protected=1))"
+    changed = 0
     if b.get("ids"):
         ids = [int(i) for i in b["ids"]]
         for i in range(0, len(ids), 500):
             ch = ids[i:i + 500]
-            c.execute(f"UPDATE health SET selected=? WHERE scan_id=? AND state='ok' AND {free} AND id IN ({','.join('?' * len(ch))})",
-                      (sel, sid, sid, *ch))
+            changed += c.execute(f"UPDATE health SET selected=? WHERE scan_id=? AND state='ok' AND {free} AND id IN ({','.join('?' * len(ch))})",
+                                 (sel, sid, sid, *ch)).rowcount
     else:
         sql, args = f"UPDATE health SET selected=? WHERE scan_id=? AND state='ok' AND {free}", [sel, sid, sid]
-        q, kind = (b.get("q") or "").strip(), (b.get("kind") or "").strip()
-        if q:
-            sql += " AND path LIKE ? ESCAPE '\\'"
-            args.append(_like_arg(q))
-        if kind:
-            sql += " AND kind=?"
-            args.append(kind)
-        c.execute(sql, args)
+        fs, fa = _health_filters((b.get("q") or "").strip(), (b.get("kind") or "").strip(), (b.get("ext") or "").strip(),
+                                 under=(b.get("under") or "").strip(), sub=bool(b.get("sub", True)))
+        sql += fs
+        args += fa
+        changed = c.execute(sql, args).rowcount
     c.commit()
-    return jsonify(summary=health_summary(sid))
+    return jsonify(summary=health_summary(sid), changed=changed)
 
 
 @app.post("/api/scans/<int:sid>/health/act")
@@ -734,7 +791,7 @@ def act_health(sid):
     scan_row(sid)
     b = request.get_json(force=True, silent=True) or {}
     action = b.get("action")
-    if action not in ("trash", "move"):
+    if action not in ("trash", "move", "delete"):
         return err("Unknown action")
     dest = None
     if action == "move":
@@ -751,7 +808,7 @@ def act_health(sid):
     return jsonify(res)
 
 
-_comp = {"running": False, "sid": None, "total": 0, "done": 0, "saved": 0, "failed": 0, "errors": [], "current": "", "cancel": False, "fmt": ""}
+_comp = {"running": False, "sid": None, "total": 0, "done": 0, "saved": 0, "failed": 0, "errors": [], "current": "", "cancel": False, "fmt": "", "total_bytes": 0, "done_bytes": 0, "cur_size": 0, "cur_phase": "", "cur_pct": None, "started": 0}
 
 
 def compress_running():
@@ -777,7 +834,8 @@ def compress_start(sid):
                              "AND h.state='ok' AND COALESCE(f.protected,0)=0", (sid,)).fetchone()[0]
         if not n:
             return err("Nothing selected")
-        _comp.update(running=True, sid=sid, total=n, done=0, saved=0, failed=0, errors=[], current="", cancel=False, fmt=fmt)
+        _comp.update(running=True, sid=sid, total=n, done=0, saved=0, failed=0, errors=[], current="", cancel=False, fmt=fmt, total_bytes=0, done_bytes=0,
+                     cur_size=0, cur_phase="starting", cur_pct=None, started=time.time())
 
     def work():
         conn = db.connect()
@@ -793,10 +851,47 @@ def compress_start(sid):
     return jsonify(ok=True, total=n)
 
 
+_tool = {"running": False, "ok": None, "log": ""}
+
+
+@app.post("/api/tools/7z/install")
+def install_7z():
+    """Install the 7z program inside this container (needs internet; used when the image was built without it)."""
+    if actions.sevenzip_exe():
+        return jsonify(ok=True, already=True)
+    with _lock:
+        if _tool["running"]:
+            return err("An install is already running", 409)
+        _tool.update(running=True, ok=None, log="")
+
+    def work():
+        import subprocess
+        env = dict(os.environ, DEBIAN_FRONTEND="noninteractive")
+        cmd = ("apt-get update -qq && (apt-get install -y --no-install-recommends p7zip-full || apt-get install -y --no-install-recommends 7zip)")
+        try:
+            p = subprocess.run(["sh", "-c", cmd], capture_output=True, text=True, env=env, timeout=900)
+            _tool["log"] = ((p.stdout or "") + (p.stderr or ""))[-1500:]
+            _tool["ok"] = bool(actions.sevenzip_exe())
+        except Exception as e:  # noqa: BLE001
+            _tool["log"] = f"{type(e).__name__}: {e}"
+            _tool["ok"] = False
+        finally:
+            _tool["running"] = False
+
+    threading.Thread(target=work, daemon=True).start()
+    return jsonify(ok=True, started=True)
+
+
+@app.get("/api/tools/7z/status")
+def install_7z_status():
+    return jsonify(running=_tool["running"], ok=_tool["ok"], log=_tool["log"], installed=bool(actions.sevenzip_exe()))
+
+
 @app.get("/api/compress/status")
 def compress_status():
     out = dict(_comp)
     out["errors"] = _comp["errors"][:50]
+    out["now"] = time.time()
     sid = _comp.get("sid")
     out["summary"] = health_summary(sid) if sid else None
     return jsonify(out)
@@ -1062,6 +1157,259 @@ def move_file(fid):
     except (ValueError, OSError) as e:
         return err(str(e))
     return jsonify(target=target)
+
+
+# ------------------------------------------------------------ folder browser (look inside folders, act on a whole folder)
+def _safe_dir(path, need_depth=0):
+    """Real folder inside the data root. need_depth=2 means it must be below a shared folder (never a share itself)."""
+    if not path or not under_root(path):
+        return None, "That folder is outside the data folder"
+    rp = os.path.realpath(path)
+    if not os.path.isdir(rp):
+        return None, "That folder no longer exists"
+    rel = os.path.relpath(rp, DATA_ROOT)
+    parts = [] if rel == "." else rel.split(os.sep)
+    if TRASH_NAME in parts:
+        return None, "That is the quarantine area"
+    if need_depth and len(parts) < need_depth:
+        return None, "For safety, whole shared folders can't be removed from here. Open it and pick a folder inside it."
+    return rp, None
+
+
+@app.get("/api/ls")
+def ls_folder():
+    """Sub-folders and files of one folder, for the folder browser."""
+    rp, e = _safe_dir(request.args.get("path") or START_PATH)
+    if e:
+        return err(e, 404)
+    dirs, files, more = [], [], False
+    try:
+        with os.scandir(rp) as it:
+            for ent in it:
+                if ent.name == TRASH_NAME or ent.name[0] == "#" or ent.name == "@eaDir":
+                    continue
+                try:
+                    if ent.is_dir(follow_symlinks=False):
+                        dirs.append({"name": ent.name})
+                    elif ent.is_file(follow_symlinks=False):
+                        st = ent.stat(follow_symlinks=False)
+                        files.append({"name": ent.name, "size": st.st_size, "mtime": st.st_mtime,
+                                      "mime": _mime(ent.name), "viewable": _viewable(_mime(ent.name))})
+                except OSError:
+                    pass
+                if len(dirs) + len(files) > 5000:
+                    more = True
+                    break
+    except OSError as ex:
+        return err(str(ex), 403)
+    dirs.sort(key=lambda d: d["name"].lower())
+    files.sort(key=lambda f: f["name"].lower())
+    parent = os.path.dirname(rp) if rp != DATA_ROOT else None
+    rel = os.path.relpath(rp, DATA_ROOT)
+    return jsonify(path=rp, parent=parent, dirs=dirs, files=files, more=more,
+                   can_act=(rel != "." and len(rel.split(os.sep)) >= 2))
+
+
+def _folder_stats(rp, limit_s=90):
+    t0 = time.time()
+    n = b = d = 0
+    cut = False
+    for root, dirs, files in os.walk(rp):
+        d += len(dirs)
+        for f in files:
+            try:
+                st = os.lstat(os.path.join(root, f))
+                b += st.st_size
+                n += 1
+            except OSError:
+                pass
+        if time.time() - t0 > limit_s:
+            cut = True
+            break
+    return n, b, d, cut
+
+
+@app.get("/api/foldersize")
+def folder_size():
+    rp, e = _safe_dir(request.args.get("path"))
+    if e:
+        return err(e, 404)
+    n, b, d, cut = _folder_stats(rp)
+    return jsonify(files=n, bytes=b, folders=d, partial=cut)
+
+
+@app.get("/api/rawpath")
+def raw_path():
+    """Open any file in the browser folder view (video, picture, audio, PDF play inline; other types download)."""
+    path = request.args.get("path", "")
+    if not under_root(path) or not os.path.isfile(path) or TRASH_NAME in path.split(os.sep):
+        abort(404)
+    mime = _mime(path)
+    inline = _viewable(mime) and not request.args.get("dl")
+    resp = send_file(path, mimetype=mime, as_attachment=not inline, download_name=os.path.basename(path), conditional=True)
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    return resp
+
+
+@app.get("/api/thumbpath")
+def thumb_path():
+    """Still frame / small picture for a file picked in the folder view (used when the browser can't play the format)."""
+    path = request.args.get("path", "")
+    if not under_root(path) or not os.path.isfile(path):
+        abort(404)
+    px = max(64, min(1920, request.args.get("s", 900, int)))
+    st = os.stat(path)
+    key = hashlib.sha1(f"{path}|{st.st_size}|{st.st_mtime_ns}|{px}|p".encode()).hexdigest()
+    out = os.path.join(THUMB_DIR, key + ".jpg")
+    if not os.path.exists(out):
+        kind = media.kind_of(path)
+        try:
+            if kind == "video":
+                import subprocess
+                p = subprocess.run([media.FFMPEG, "-v", "error", "-ss", "3", "-i", path, "-frames:v", "1", "-an",
+                                    "-vf", f"scale='min({px},iw)':-2", "-q:v", "5", "-y", out], capture_output=True, timeout=60)
+                if p.returncode != 0 or not os.path.exists(out):
+                    subprocess.run([media.FFMPEG, "-v", "error", "-i", path, "-frames:v", "1", "-an",
+                                    "-vf", f"scale='min({px},iw)':-2", "-q:v", "5", "-y", out], capture_output=True, timeout=60)
+                if not os.path.exists(out):
+                    abort(404)
+            elif kind == "img":
+                from PIL import Image, ImageOps
+                Image.MAX_IMAGE_PIXELS = None
+                with Image.open(path) as im:
+                    im = ImageOps.exif_transpose(im)
+                    im.thumbnail((px, px))
+                    im.convert("RGB").save(out, "JPEG", quality=80)
+            else:
+                abort(404)
+        except Exception:  # noqa: BLE001
+            abort(404)
+    return send_file(out, mimetype="image/jpeg", max_age=86400)
+
+
+@app.post("/api/folder/act")
+def folder_act():
+    """Quarantine, move or permanently delete a whole folder. Runs in the background; the page polls /api/folder/status."""
+    b = request.get_json(force=True, silent=True) or {}
+    action = b.get("action")
+    if action not in ("trash", "move", "delete"):
+        return err("Unknown action")
+    rp, e = _safe_dir(b.get("path"), need_depth=2)
+    if e:
+        return err(e)
+    if os.path.islink(b.get("path") or "") or os.path.islink(rp):
+        return err("That is a shortcut (link), not a real folder")
+    dest = None
+    if action == "move":
+        dp, e2 = _safe_dir(os.path.normpath(b.get("dest") or ""))
+        if e2:
+            return err("Pick a destination inside the data folder")
+        if dp == rp or dp.startswith(rp + os.sep):
+            return err("Can't move a folder into itself")
+        if os.path.dirname(rp) == dp:
+            return err("The folder is already there")
+        dest = dp
+    with _lock:
+        if _fold["running"] or (_current is not None and _current.is_alive()) or _comp["running"]:
+            return err("A scan, compression or another folder job is running. Wait for it to finish (or cancel it) first.", 409)
+        _fold.update(running=True, action=action, path=rp, phase="starting", files=0, bytes=0, total_files=0, total_bytes=0,
+                     ok=None, error="", warn="", state="", target="", id=_fold["id"] + 1)
+    threading.Thread(target=_folder_work, args=(rp, action, dest), daemon=True).start()
+    return jsonify(started=True, id=_fold["id"])
+
+
+def _folder_work(rp, action, dest):
+    import shutil
+    import uuid
+    st = _fold
+    try:
+        if action == "move":
+            target = actions._unique(os.path.join(dest, os.path.basename(rp)))
+            st["phase"] = "moving"
+            shutil.move(rp, target)
+            st.update(state="moved", target=target)
+        elif action == "trash":
+            st["phase"] = "counting"
+            n, size, d, cut = _folder_stats(rp, 30)
+            st.update(total_files=n, total_bytes=size, phase="moving")
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            tdir = os.path.join(actions.trash_dir_for(rp, DATA_ROOT, TRASH_NAME), stamp)
+            os.makedirs(tdir, exist_ok=True)
+            tpath = os.path.join(tdir, f"{uuid.uuid4().hex[:8]}_{os.path.basename(rp)}")
+            shutil.move(rp, tpath)
+            with open(os.path.join(tdir, "manifest.tsv"), "a", encoding="utf-8") as mf:
+                mf.write(f"{os.path.basename(tpath)}\t{rp}\n")
+            st.update(state="trashed", target=tpath, files=n, bytes=size)
+            _db_retry(lambda c: c.execute("INSERT INTO trash(orig_path,trash_path,size,ts) VALUES(?,?,?,?)", (rp, tpath, size, time.time())), st)
+        else:
+            st["phase"] = "counting"
+            n, size, d, cut = _folder_stats(rp, 60)
+            st.update(total_files=n, total_bytes=size, phase="deleting")
+            bad = 0
+            for root, dirs, files in os.walk(rp, topdown=False):
+                for f in files:
+                    fp = os.path.join(root, f)
+                    try:
+                        sz = os.lstat(fp).st_size
+                        os.remove(fp)
+                        st["files"] += 1
+                        st["bytes"] += sz
+                    except OSError:
+                        bad += 1
+                for dn in dirs:
+                    try:
+                        os.rmdir(os.path.join(root, dn))
+                    except OSError:
+                        pass
+            try:
+                os.rmdir(rp)
+            except OSError:
+                pass
+            if os.path.exists(rp):
+                raise OSError(f"{bad} item(s) could not be deleted (in use or no permission); the rest of the folder was removed")
+            st["state"] = "deleted"
+        pre = rp + os.sep
+        state = st["state"]
+
+        def upd(c):
+            c.execute("UPDATE health SET state=?,selected=0 WHERE state='ok' AND file_id IN "
+                      "(SELECT id FROM files WHERE substr(path,1,?)=?)", (state, len(pre), pre))
+            c.execute("UPDATE files SET state=?,selected=0 WHERE state='ok' AND substr(path,1,?)=?", (state, len(pre), pre))
+            actions._log(c, None, "folder-" + action, rp, st["target"], True)
+        _db_retry(upd, st)
+        st["ok"] = True
+    except Exception as ex:  # noqa: BLE001
+        import traceback
+        traceback.print_exc()
+        st["ok"] = False
+        st["error"] = f"{type(ex).__name__}: {ex}"
+        if action == "delete" and not os.path.exists(rp):
+            st["ok"] = True
+    finally:
+        st["running"] = False
+
+
+def _db_retry(fn, st):
+    """Run a database write on its own connection, retrying if the database is busy. The files are already changed on disk,
+    so a failure here only means the old scan results are not updated (shown as a note)."""
+    for i in range(6):
+        conn = db.connect()
+        try:
+            fn(conn)
+            conn.commit()
+            st["warn"] = ""
+            return True
+        except Exception as ex:  # noqa: BLE001
+            st["warn"] = f"Folder done, but the saved results could not be updated ({type(ex).__name__}); re-run the scan to refresh them."
+            time.sleep(2 + i)
+        finally:
+            conn.close()
+    return False
+
+
+@app.get("/api/folder/status")
+def folder_status():
+    return jsonify(dict(_fold))
 
 
 @app.get("/api/thumb/<int:fid>")
