@@ -1,8 +1,12 @@
 # ServerDedupe
 
-A self-hosted, web-based duplicate finder for servers and NAS boxes. It runs in Docker next to your files, scans them in
-place (no copying over the network), and you review and clean up the results from any browser.
-Developed and used daily on a Synology DS223j, but nothing in it requires Synology: it runs anywhere Docker does.
+A self-hosted, web-based duplicate file finder designed for servers and NAS devices.
+
+It runs in Docker alongside your files, scanning them in place without transferring data across the network. You can review, manage, and clean up duplicate files from any web browser.
+
+The application was developed and is used daily on a Synology DS223j with 6 GB of memory, but it's not Synology-dependent. It runs anywhere Docker is supported.
+
+<b>The real advantage is performance:</b> powerful duplicate detection and management tools run directly on the NAS or server, eliminating unnecessary network transfers and latency. More available memory generally means better performance, especially when scanning large file collections.
 
 ## Features
 
