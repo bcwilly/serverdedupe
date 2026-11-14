@@ -21,13 +21,31 @@ Developed and used daily on a Synology DS223j, but nothing in it requires Synolo
 Requires Docker with Compose.
 
 ```bash
-git clone https://github.com/<your-account>/serverdedupe.git
+git clone https://github.com/bcwilly/serverdedupe.git
 cd serverdedupe
-# edit docker-compose.yml: set the folder to scan (the last "volumes:" line) and your time zone
+# 1. edit docker-compose.yml (see below), then:
 docker compose up -d --build
 ```
 
 Open `http://<server-address>:5081`.
+
+Before starting, open `docker-compose.yml` and set:
+- **The folder to scan:** the last line under `volumes:`. Replace `/path/to/your/files` with your own folder.
+- **Your time zone:** `TZ`, for scheduled jobs (for example `America/New_York`).
+- **The port:** see below.
+
+### Changing the port
+
+The default web address uses port **5081**. In `docker-compose.yml`, find:
+
+```yaml
+ports:
+  - "5081:5070"
+```
+
+Change only the **left** number to the port you want, for example `"8080:5070"`, then open `http://<server-address>:8080`. Leave the right number (`5070`) alone: that is the port inside the container. If the app doesn't start, another program is probably already using that port, so pick a different one.
+
+After changing it, apply it with `docker compose up -d` (on Synology, Stop and Start the project in Container Manager).
 
 On Synology: Container Manager → Project → Create, point it at the folder holding `docker-compose.yml`, then Build/Start.
 
