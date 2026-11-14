@@ -84,6 +84,14 @@ CREATE TABLE IF NOT EXISTS trash(
     orig_path TEXT, trash_path TEXT, size INTEGER, ts REAL,
     restored INTEGER DEFAULT 0, purged INTEGER DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS cqueue(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scan_id INTEGER, health_id INTEGER, file_id INTEGER, path TEXT, size INTEGER, mtime_ns INTEGER,
+    fmt TEXT, level TEXT, keep INTEGER DEFAULT 0,
+    added REAL, state TEXT DEFAULT 'queued', note TEXT, saved INTEGER DEFAULT 0, started REAL, finished REAL
+);
+CREATE INDEX IF NOT EXISTS ix_cqueue_state ON cqueue(state, id);
+CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS action_log(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts REAL, scan_id INTEGER, action TEXT, path TEXT, detail TEXT, ok INTEGER

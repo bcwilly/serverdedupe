@@ -276,13 +276,13 @@ def sevenzip_exe():
     return None
 
 
-def _run_archiver(cmd, cwd, cancel, on_pct=None):
+def _run_archiver(cmd, cwd, cancel, on_pct=None, low=True):
     """Run a command at low priority; poll so a Cancel can stop it. on_pct(0-100) is called as the archiver reports progress.
     Returns (returncode, last output line)."""
     import re
     import subprocess
     import threading
-    proc = subprocess.Popen(["nice", "-n", "19"] + cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    proc = subprocess.Popen((["nice", "-n", "19"] if low else []) + cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     buf = []
 
     def reader():
@@ -314,7 +314,7 @@ def _run_archiver(cmd, cwd, cancel, on_pct=None):
     return proc.returncode, (lines[-1] if lines else "")
 
 
-def compress_file(path, size, fmt, level, cancel, progress=None):
+def compress_file(path, size, fmt, level, cancel, progress=None, full_cpu=False):
     """Make <file>.7z or <file>.zip next to the file, test it, and return (archive_path, archive_size).
     Raises ValueError (with a plain reason) when nothing useful was made; the original is never touched here."""
     d, name = os.path.split(path)
@@ -326,27 +326,27 @@ def compress_file(path, size, fmt, level, cancel, progress=None):
         raise ValueError("not enough free space beside the file to build the archive")
     arch = _unique(os.path.join(d, name + (".7z" if fmt == "7z" else ".zip")))
     tmp = arch + ".part"
-    mx = "1" if level == "fast" else "5"
+    mx = {"fast": "1", "max": "9"}.get(level, "5")
     try:
         if exe:
             kind = "7z" if fmt == "7z" else "zip"
             if progress:
                 progress("compressing", None)
-            rc, last = _run_archiver([exe, "a", "-t" + kind, "-mx=" + mx, "-mmt=2", "-y", "-bsp1", "-bso0", tmp, "./" + name], d, cancel,
-                                     (lambda pc: progress("compressing", pc)) if progress else None)
+            rc, last = _run_archiver([exe, "a", "-t" + kind, "-mx=" + mx, "-mmt=" + (str(os.cpu_count() or 2) if full_cpu else "2"), "-y", "-bsp1", "-bso0", tmp, "./" + name], d, cancel,
+                                     (lambda pc: progress("compressing", pc)) if progress else None, low=not full_cpu)
             if rc != 0:
                 raise ValueError("the archiver failed: " + (last or f"exit {rc}"))
             if progress:
                 progress("testing", 0)
             rc, last = _run_archiver([exe, "t", "-t" + kind, "-bsp1", "-bso0", tmp], d, cancel,
-                                     (lambda pc: progress("testing", pc)) if progress else None)
+                                     (lambda pc: progress("testing", pc)) if progress else None, low=not full_cpu)
             if rc != 0:
                 raise ValueError("the finished archive did not pass its test: " + (last or f"exit {rc}"))
         else:                                                   # zip without 7z installed: plain Python
             import zipfile
             if progress:
                 progress("compressing", None)
-            with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, compresslevel=1 if level == "fast" else 6, allowZip64=True) as z:
+            with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, compresslevel={"fast": 1, "max": 9}.get(level, 6), allowZip64=True) as z:
                 z.write(path, name)
             with zipfile.ZipFile(tmp) as z:
                 if z.testzip() is not None:
@@ -369,12 +369,13 @@ def compress_file(path, size, fmt, level, cancel, progress=None):
                 pass
 
 
-def perform_compress(conn, scan_id, fmt, level, keep, data_root, trash_name, status, cancel):
+def perform_compress(conn, scan_id, fmt, level, keep, data_root, trash_name, status, cancel, full_cpu=False, rows=None):
     """Compress every ticked file of a large-files scan, one at a time. status is a dict the web page polls."""
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    rows = conn.execute(
-        "SELECT h.id hid, h.file_id fid, h.path, h.size, h.mtime_ns FROM health h LEFT JOIN files f ON f.id=h.file_id "
-        "WHERE h.scan_id=? AND h.selected=1 AND h.state='ok' AND COALESCE(f.protected,0)=0 ORDER BY h.size DESC", (scan_id,)).fetchall()
+    if rows is None:
+        rows = conn.execute(
+            "SELECT h.id hid, h.file_id fid, h.path, h.size, h.mtime_ns FROM health h LEFT JOIN files f ON f.id=h.file_id "
+            "WHERE h.scan_id=? AND h.selected=1 AND h.state='ok' AND COALESCE(f.protected,0)=0 ORDER BY h.size DESC", (scan_id,)).fetchall()
     status.update(total=len(rows), done=0, saved=0, failed=0, errors=[], current="", total_bytes=sum(r["size"] for r in rows),
                   done_bytes=0, cur_size=0, cur_phase="", cur_pct=None, started=time.time())
     for r in rows:
@@ -395,7 +396,7 @@ def perform_compress(conn, scan_id, fmt, level, keep, data_root, trash_name, sta
             status["errors"].append(f"{path}: {why}")
             continue
         try:
-            arch, asize = compress_file(path, r["size"], fmt, level, cancel, progress)
+            arch, asize = compress_file(path, r["size"], fmt, level, cancel, progress, full_cpu)
             status["cur_phase"], status["cur_pct"] = "finishing", 100
             detail = arch
             if not keep:

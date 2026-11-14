@@ -35,7 +35,24 @@ html[data-size=l] body{zoom:1.25}
 #sizer button{background:var(--panel2);border:1px solid var(--line);color:var(--mute);padding:3px 9px;cursor:pointer;font:inherit;border-radius:6px}
 #sizer button.on{color:var(--text);border-color:var(--accent)}
 .f.ghost{opacity:.45}
+#strip{background:var(--panel);border-bottom:1px solid var(--line);padding:5px 20px;font-size:12px;color:var(--mute);display:flex;gap:18px;flex-wrap:wrap;cursor:pointer}
+#strip b{color:var(--text)}
+.tl{display:grid;grid-template-columns:44px repeat(7,1fr);gap:0;font-size:11px;margin-top:8px;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.tl .dh{padding:4px 6px;border-bottom:1px solid var(--line);color:var(--mute);background:var(--panel2);text-align:center}
+.tl .dh.today{color:var(--text);font-weight:600}
+.tl .ax{position:relative;height:528px;border-right:1px solid var(--line)}
+.tl .ax span{position:absolute;right:4px;color:var(--mute);font-size:10px;transform:translateY(-50%)}
+.tl .col{position:relative;height:528px;border-right:1px solid var(--line);background:repeating-linear-gradient(to bottom,transparent 0,transparent 21px,var(--line) 21px,var(--line) 22px)}
+.tl .col:last-child{border-right:0}
+.tl .blk{position:absolute;left:2px;right:2px;border-radius:5px;padding:1px 4px;overflow:hidden;color:#fff;font-size:10px;line-height:1.25;cursor:pointer;border:1px solid rgba(255,255,255,.25)}
+.tl .blk.guess{border-style:dashed;opacity:.8}
+.tl .blk.clash{outline:2px solid var(--danger);z-index:3}
+.tl .win{position:absolute;left:0;right:0;background:rgba(120,180,255,.10);border-top:1px dashed rgba(120,180,255,.5);border-bottom:1px dashed rgba(120,180,255,.5)}
+.tl .now{position:absolute;left:0;right:0;height:2px;background:var(--danger);z-index:4}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--mute);margin-top:6px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px;vertical-align:-1px}
 .f.ghost .nm b{text-decoration:line-through}
+.f.ghost.q .nm b{text-decoration:none}
 .brow{display:flex;align-items:center;gap:10px;padding:4px 8px;border-bottom:1px solid var(--line);font-size:13px}
 .brow:hover{background:var(--panel2)}
 .brow .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
@@ -158,6 +175,7 @@ input[type=checkbox],input[type=range]{accent-color:var(--accent)}
   <div id="sizer" title="Display size"></div>
 </header>
 <div id="banner" class="hide"></div>
+<div id="strip" title="Click to open the Schedule tab"></div>
 </div>
 <main id="main"></main>
 
@@ -211,7 +229,7 @@ const store = { get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.pa
                 set(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)) }catch(e){} } };
 
 const S = { cfg:null, tab:'scan', editJob:null, rootsBackup:null, roots:store.get('roots',[]), scanId:store.get('scanId',null), loaded:0, sum:null, poll:null };
-const TABS = [['scan','Scan'],['jobs','Schedule'],['results','Results'],['trash','Quarantine'],['history','History']];
+const TABS = [['scan','Scan'],['jobs','Schedule'],['queue','Compress queue'],['results','Results'],['trash','Quarantine'],['history','History']];
 
 function renderNav(){
   const n = $('#nav'); n.replaceChildren(...TABS.map(([k,l]) => el('button',{class:S.tab===k?'on':'',onclick:()=>go(k)},l)));
@@ -221,7 +239,7 @@ function setSize(k){
   document.documentElement.dataset.size = k; store.set('size',k);
   $('#sizer').replaceChildren('Display ', ...[['s','Small'],['m','Medium'],['l','Large']].map(([v,l]) => el('button',{class:k===v?'on':'',title:l+' display',onclick:()=>setSize(v)},l)));
 }
-function go(tab){ S.tab=tab; S.refresh=null; renderNav(); ({scan:viewScan,jobs:viewJobs,results:viewResults,trash:viewTrash,history:viewHistory})[tab](); }
+function go(tab){ S.tab=tab; S.refresh=null; renderNav(); ({scan:viewScan,jobs:viewJobs,queue:viewQueue,results:viewResults,trash:viewTrash,history:viewHistory})[tab](); }
 
 /* ---------- folder picker ---------- */
 function pickFolder(title, cb, multi=false){
@@ -999,8 +1017,9 @@ async function viewLarge(sc){
   const mk = (t,c,fn) => el('button',{class:'btn '+c,onclick:fn},t);
   const has7z = !!S.cfg.sevenzip;
   const fmt = el('select',{style:'width:auto'}, el('option',{value:'7z',disabled:!has7z,selected:has7z},'7z (best compression)'+(has7z?'':' — not installed yet')), el('option',{value:'zip',selected:!has7z},'zip (opens anywhere)'));
-  const level = el('select',{style:'width:auto'}, el('option',{value:'normal'},'Normal'), el('option',{value:'fast'},'Fast (less squeezing, easier on the NAS)'));
+  const level = el('select',{style:'width:auto'}, el('option',{value:'normal'},'Normal'), el('option',{value:'max'},'Maximum (smallest, slowest)'), el('option',{value:'fast'},'Fast (less squeezing, easier on the NAS)'));
   const keep = el('input',{type:'checkbox'});
+  const fullcpu = el('input',{type:'checkbox'});
   const prog = el('div',{class:'hide',style:'margin:8px 0'});
   const inst = el('button',{class:'btn',title:'Downloads and installs the 7z program inside this container (needs internet; takes a minute). Nothing else changes.',onclick:async()=>{
     inst.disabled = true; inst.textContent = 'Installing 7z…';
@@ -1017,11 +1036,11 @@ async function viewLarge(sc){
     }catch(e){ inst.disabled = false; inst.textContent = 'Install 7z'; toast(e.message, 8000); }
   }},'Install 7z');
   S.refresh = () => load(true);
-  const GHOST = {trashed:'quarantined', moved:'moved', deleted:'deleted', compressed:'compressed'};
+  const GHOST = {queued:'queued',trashed:'quarantined', moved:'moved', deleted:'deleted', compressed:'compressed'};
   function ghostRows(test, state){
     list.querySelectorAll('.f[data-path]').forEach(r => {
       if(r.classList.contains('ghost') || !test(r)) return;
-      r.classList.add('ghost'); r.classList.remove('sel');
+      r.classList.add('ghost'); r.classList.remove('sel'); if(state==='queued') r.classList.add('q');
       const cb = r.querySelector('input[type=checkbox]'); if(cb){ cb.checked = false; cb.disabled = true; }
       r.querySelectorAll('.badge').forEach(x=>x.remove());
       const last = r.lastElementChild; if(last) last.append(el('span',{class:'badge',style:'color:var(--danger)'}, GHOST[state]||state));
@@ -1033,7 +1052,8 @@ async function viewLarge(sc){
     chips.replaceChildren(el('div',{class:'chip'},el('b',{},sum.listed.toLocaleString()),'big files listed'),
       el('div',{class:'chip'},el('b',{},fmtSize(sum.bytes)),'in those files'),
       el('div',{class:'chip sel'},el('b',{},sum.selected.toLocaleString()+' · '+fmtSize(sum.selected_bytes)),'selected'),
-      sum.handled ? el('div',{class:'chip'},el('b',{},sum.handled.toLocaleString()),'moved / quarantined') : '');
+      sum.handled ? el('div',{class:'chip'},el('b',{},sum.handled.toLocaleString()),'moved / quarantined') : '',
+      sum.queued ? el('div',{class:'chip',style:'cursor:pointer',title:'Open the Compress queue tab',onclick:()=>go('queue')},el('b',{},sum.queued.toLocaleString()),'in the compression queue') : '');
     const cur = kindSel.value;
     const curE = extSel.value, es = Object.entries(sum.exts||{}).filter(x=>x[0]).sort((a,b)=>b[1][1]-a[1][1]);
     if(curE && !es.find(x=>x[0]===curE)){ ext = ''; }
@@ -1074,8 +1094,16 @@ async function viewLarge(sc){
   function resetDel(){ delBtn.className = 'btn'; delBtn.style.cssText = 'border-color:var(--danger);color:var(--danger)'; delBtn.textContent = 'Delete permanently'; }
   async function compress(){
     if(!sum || !sum.selected) return toast('Nothing selected');
-    try{ await api('/api/scans/'+sc.id+'/health/compress',{format:fmt.value,level:level.value,keep:keep.checked}); toast('Compression started. It runs in the background; you can leave this page.'); watch(); }
+    try{ await api('/api/scans/'+sc.id+'/health/compress',{format:fmt.value,level:level.value,keep:keep.checked,full_cpu:fullcpu.checked}); toast('Compression started. It runs in the background; you can leave this page.'); watch(); }
     catch(e){ toast(e.message, 8000) }
+  }
+  async function enqueue(){
+    if(!sum || !sum.selected) return toast('Nothing selected');
+    try{
+      const r = await api('/api/cqueue/add',{scan_id:sc.id,format:fmt.value,level:level.value,keep:keep.checked});
+      ghostRows(x => { const c = x.querySelector('input[type=checkbox]'); return c && c.checked; }, 'queued'); sum = r.summary; draw();
+      toast(`${r.added} file${r.added===1?'':'s'} (${fmtSize(r.bytes)}) added to the compression queue. Set the night window on the Compress queue tab.`, 9000); refreshStrip();
+    }catch(e){ toast(e.message, 8000) }
   }
   function watch(){ if(poll) return; tick(); poll = setInterval(tick, 2000); }
   async function tick(){
@@ -1092,12 +1120,13 @@ async function viewLarge(sc){
       const pct = tb ? Math.min(100, doneB*100/tb) : 0;
       const el_s = Math.max(1, (st.now||0) - (st.started||0));
       const eta = (pct>3 && doneB>0) ? Math.round(el_s*(tb-doneB)/doneB) : null;
+      const spd = (doneB>0 ? (doneB/el_s/1048576).toFixed(1) : '0.0')+' MB/s';
       const etaTxt = eta==null ? 'working out the time left…' : eta<90 ? 'about '+eta+' seconds left' : 'about '+Math.round(eta/60)+' min left';
       const phaseTxt = {compressing:'Compressing',testing:'Testing the archive',finishing:'Finishing up',starting:'Starting'}[st.cur_phase] || 'Working';
       const bar = (w,h,ind) => el('div',{style:`height:${h}px;background:var(--bg);border-radius:6px;overflow:hidden;margin:4px 0`}, el('div',{style:`height:100%;width:${w}%;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .5s`+(ind?';opacity:.55':'')}));
       prog.replaceChildren(el('div',{class:'warnbar',style:'display:block'},
         el('div',{style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap'}, el('b',{},`Compressing file ${Math.min(st.total, st.done+st.failed+1)} of ${st.total}`),
-          el('span',{class:'mute'},`${pct.toFixed(0)}% · ${fmtSize(doneB)} of ${fmtSize(tb)} · ${etaTxt}`), el('span',{style:'flex:1'}), mk('Cancel','',()=>api('/api/compress/cancel',{}))),
+          el('span',{class:'mute'},`${pct.toFixed(0)}% · ${fmtSize(doneB)} of ${fmtSize(tb)} · ${spd} · ${etaTxt}`), el('span',{style:'flex:1'}), mk('Cancel','',()=>api('/api/compress/cancel',{}))),
         bar(pct.toFixed(1),12,false),
         el('div',{class:'mute small',style:'word-break:break-all'}, `${phaseTxt}: ${st.current||'…'} (${fmtSize(cur)})`+(st.cur_pct!=null?` · ${st.cur_pct}%`:'')),
         bar(st.cur_pct==null ? 100 : (phaseFrac*100).toFixed(0), 5, st.cur_pct==null)));
@@ -1143,8 +1172,9 @@ async function viewLarge(sc){
     el('div',{class:'toolbar'}, mk('Move to quarantine','danger',()=>act('trash')), mk('Move to folder…','',()=>act('move')), delBtn,
       el('span',{class:'mute small'}, 'Delete permanently skips the quarantine and cannot be undone (you will be asked to click once more to confirm).')),
     el('div',{class:'toolbar'}, el('b',{},'Compress selected:'), fmt, has7z ? '' : inst, level,
+      el('label',{style:'display:flex;gap:6px;align-items:center;color:var(--text)',title:'Uses every processor core and normal priority. Much faster, but the NAS (Jellyfin, DSM, other apps) may feel slow while it runs. Off = 2 cores at the lowest priority.'}, fullcpu, 'Use full CPU (faster, may slow the NAS)'),
       el('label',{style:'display:flex;gap:6px;align-items:center;color:var(--text)',title:'Leave the original where it is as well as the new archive. Off by default: the original is moved to the quarantine so you can restore it.'}, keep, 'Keep the original too'),
-      mk('Compress','primary',compress),
+      mk('Compress now','primary',compress), mk('Add to compression queue','',enqueue),
       el('span',{class:'mute small'}, 'Makes “name.7z” (or .zip) beside each file, tests it, then moves the original to quarantine. Slow on a NAS, so it runs in the background. Photos, video, music and zips barely shrink.')),
     prog, list, el('div',{style:'text-align:center;margin:16px'}, more));
   await load(true);
@@ -1315,6 +1345,98 @@ function openJobModal(job, body){
       }},'Save job'))));
   document.body.append(m); sync();
 }
+
+/* ---------- status strip, durations, timeline, compression queue ---------- */
+function fmtLen(t){ t=Math.round(t||0); if(t<60) return t+'s'; if(t<3600) return Math.floor(t/60)+'m '+String(t%60).padStart(2,'0')+'s'; const h=Math.floor(t/3600); return h+'h '+String(Math.floor(t%3600/60)).padStart(2,'0')+'m'; }
+const fmtWhen = t => new Date(t*1000).toLocaleString([], {weekday:'short', hour:'numeric', minute:'2-digit'});
+async function refreshStrip(){
+  let o; try{ o = await (await fetch('/api/overview')).json(); }catch(e){ return; }
+  const box = $('#strip'); if(!box) return; const kids = [];
+  kids.push(o.running ? el('span',{}, '● ', el('b',{}, o.running.label), o.running.since ? ' · '+fmtLen(o.now-o.running.since)+' so far' : '') : el('span',{}, 'Idle'));
+  if(o.queue.waiting) kids.push(el('span',{}, `Compression queue: ${o.queue.waiting} file${o.queue.waiting===1?'':'s'} (${fmtSize(o.queue.bytes)}) · `+(o.queue.enabled ? (o.queue.in_window ? `window open now until ${o.queue.end}` : 'next window '+fmtWhen(o.queue.next_start)) : 'no night window set')));
+  if(o.next) kids.push(el('span',{}, 'Next scheduled: ', el('b',{}, o.next.name), ' · '+fmtWhen(o.next.at)));
+  box.replaceChildren(...kids);
+}
+const FAMCOL = {regular:'#6366f1',photo:'#0ea5e9',video:'#8b5cf6',audio:'#d946ef',folders:'#16a34a',health:'#d97706',large:'#0d9488'};
+async function drawTimeline(box){
+  let t; try{ t = await api('/api/schedule/timeline'); }catch(e){ return; }
+  const H = 22, DAY = 86400, cols = [], items = [];
+  t.jobs.forEach(j => j.starts.forEach(st => {
+    let dur = j.est || 1800; const guess = !j.est;
+    if(j.stop_at){ const [h,m] = j.stop_at.split(':').map(Number); let lim = (h*60+m)*60 - ((st - t.start) % DAY); if(lim <= 0) lim += DAY; dur = Math.min(dur, lim); }
+    items.push({j, st, en: st+dur, guess});
+  }));
+  items.sort((a,b)=>a.st-b.st);
+  const laneEnd = [];
+  items.forEach(it => { let l = laneEnd.findIndex(e => e <= it.st); if(l<0){ l = laneEnd.length; laneEnd.push(0); } laneEnd[l] = it.en; it.lane = l; });
+  items.forEach(it => { it.lanes = 1 + Math.max(it.lane, ...items.filter(o => o!==it && o.st<it.en && o.en>it.st).map(o=>o.lane)); });
+  const clash = new Set(), notes = [];
+  for(let i=0;i<items.length;i++) for(let k=i+1;k<items.length && items[k].st < items[i].en;k++){
+    clash.add(items[i]); clash.add(items[k]);
+    if(notes.length<6) notes.push(`${items[i].j.name} (starts ${fmtWhen(items[i].st)}, usually about ${fmtLen(items[i].en-items[i].st)}) overlaps ${items[k].j.name} (starts ${fmtWhen(items[k].st)})`);
+  }
+  const hdr = [el('div',{class:'dh'},'')], ax = el('div',{class:'ax'});
+  for(let h=0;h<24;h+=3) ax.append(el('span',{style:`top:${h*H}px`}, (h%12||12)+(h<12?'a':'p')));
+  for(let d=0; d<t.days && d<7; d++){
+    const day0 = t.start + d*DAY, col = el('div',{class:'col'});
+    hdr.push(el('div',{class:'dh'+(d===0?' today':'')}, new Date(day0*1000).toLocaleDateString([], {weekday:'short', day:'numeric'})));
+    if(t.window.enabled){
+      const a = t.window.start.split(':').map(Number), b = t.window.end.split(':').map(Number), am=(a[0]*60+a[1])*H/60, bm=(b[0]*60+b[1])*H/60;
+      const band = (y1,y2) => col.append(el('div',{class:'win',style:`top:${y1}px;height:${Math.max(2,y2-y1)}px`}));
+      if(am<bm) band(am,bm); else { band(am,24*H); band(0,bm); }
+    }
+    items.forEach(it => {
+      const y1 = (it.st-day0)/3600*H, y2 = (it.en-day0)/3600*H;
+      if(y2<=0 || y1>=24*H) return;
+      const top = Math.max(0,y1), h = Math.max(14, Math.min(24*H,y2)-top);
+      col.append(el('div',{class:'blk'+(it.guess?' guess':'')+(clash.has(it)?' clash':''),style:`top:${top}px;height:${h}px;left:calc(${it.lane/it.lanes*100}% + 2px);right:auto;width:calc(${100/it.lanes}% - 4px);background:${FAMCOL[it.j.family]||'#6366f1'}`,
+        title:`${it.j.name}\nStarts ${fmtWhen(it.st)}\n${it.guess?'No finished runs yet, so the length is a guess (30 min).':'Usually takes about '+fmtLen(it.en-it.st)}`,
+        onclick:()=>{ window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'}); }}, it.j.name));
+    });
+    if(t.now>=day0 && t.now<day0+DAY) col.append(el('div',{class:'now',style:`top:${(t.now-day0)/3600*H}px`}));
+    cols.push(col);
+  }
+  box.replaceChildren(
+    el('div',{class:'tl'}, ...hdr, ax, ...cols),
+    el('div',{class:'legend'}, ...Object.entries({'Duplicates / regular':'regular','Photos':'photo','Video':'video','Audio':'audio','Empty folders':'folders','Health check':'health','Large files':'large'}).map(([l,k])=>el('span',{}, el('i',{style:'background:'+FAMCOL[k]}), l)),
+      t.window.enabled ? el('span',{}, el('i',{style:'background:rgba(120,180,255,.35)'}), `Compression window ${t.window.start}–${t.window.end}`) : '', el('span',{}, el('i',{style:'background:var(--danger)'}), 'Now')),
+    notes.length ? el('div',{class:'warnbar',style:'display:block;margin-top:8px'}, el('b',{},'⚠ Overlaps'), ...notes.map(n=>el('div',{class:'small'},n))) : el('div',{class:'mute small',style:'margin-top:6px'},'No overlaps in the next week. Block lengths come from how long each job took on its last runs; a dashed block has no finished run yet, so its length is a guess. Server clock: '+t.tz+'.'));
+}
+
+async function viewQueue(){
+  const m = $('#main'); let q; try{ q = await api('/api/cqueue'); }catch(e){ return toast(e.message); }
+  const cfg = q.settings;
+  const en = el('input',{type:'checkbox',checked:cfg.enabled}), a = el('input',{type:'time',value:cfg.start,style:'width:auto'}), b = el('input',{type:'time',value:cfg.end,style:'width:auto'}), fc = el('input',{type:'checkbox',checked:cfg.full_cpu});
+  const save = async () => { try{ await api('/api/cqueue/settings',{enabled:en.checked,start:a.value,end:b.value,full_cpu:fc.checked}); toast('Saved'); viewQueue(); }catch(e){ toast(e.message,6000) } };
+  const tot = q.summary.bytes + (q.items.filter(i=>i.state==='running').reduce((x,i)=>x+i.size,0));
+  const estS = q.speed_bps ? tot/q.speed_bps : 0;
+  const ck = new Set();
+  const rows = q.items.map(i => { const cb = el('input',{type:'checkbox',disabled:i.state!=='queued',onchange:e=>e.target.checked?ck.add(i.id):ck.delete(i.id)});
+    return el('tr',{}, el('td',{},cb), el('td',{style:'word-break:break-all'}, i.path), el('td',{}, fmtSize(i.size)), el('td',{}, i.fmt+' · '+({fast:'fast',max:'maximum',normal:'normal'}[i.level]||i.level)+(i.keep?' · keep original':'')),
+      el('td',{}, el('span',{class:'pill '+(i.state==='running'?'ok':'warn')}, i.state))); });
+  const drows = q.done.map(i => el('tr',{}, el('td',{style:'word-break:break-all'}, i.path), el('td',{}, fmtSize(i.size)),
+      el('td',{}, el('span',{class:'pill '+(i.state==='done'?'ok':'bad')}, i.state), i.note?el('span',{class:'sub'},i.note):''), el('td',{}, i.finished?fmtDate(i.finished):'')));
+  m.replaceChildren(
+    el('div',{class:'card'}, el('h2',{},'Compression queue'),
+      el('p',{class:'mute small'}, 'Files you add from a Large files list wait here and are compressed one at a time inside the window below, so the NAS does the heavy work overnight. A file that is already running when the window closes is allowed to finish. The queue steps aside for a scheduled scan that is about to start, and Cancel pauses it.'),
+      el('div',{class:'row',style:'gap:14px;flex-wrap:wrap;align-items:center'},
+        el('label',{style:'display:flex;gap:6px;align-items:center;margin:0'}, en, 'Run the queue automatically between'), a, 'and', b,
+        el('label',{style:'display:flex;gap:6px;align-items:center;margin:0',title:'Uses every processor core at normal priority while the window is open. Recommended overnight.'}, fc, 'Use full CPU in the window'),
+        el('button',{class:'btn primary',style:'flex:none',onclick:save},'Save')),
+      el('div',{class:'mute small',style:'margin-top:8px'}, cfg.enabled ? (q.in_window ? 'The window is open now.' : 'Next window opens '+fmtWhen(q.next_window)+'.') : 'The night window is off, so nothing runs by itself. You can still use “Run the queue now”.', ` Server clock: ${q.tz}.`)),
+    el('div',{class:'card'}, el('h2',{},`Waiting (${q.summary.waiting})`),
+      q.items.length ? el('div',{}, el('div',{class:'mute small',style:'margin-bottom:6px'}, `${fmtSize(tot)} to do. About ${fmtLen(estS)} at the speed seen on this server so far${q.speed_bps?'':''}.`),
+        el('div',{class:'toolbar'}, el('button',{class:'btn primary',onclick:async()=>{ try{ await api('/api/cqueue/run-now',{}); toast('Started'); setTimeout(viewQueue,1500); refreshStrip(); }catch(e){ toast(e.message,6000) } }},'Run the queue now'),
+          el('button',{class:'btn',onclick:async()=>{ await api('/api/cqueue/stop',{}); await api('/api/compress/cancel',{}); toast('Stopping after the current step'); }},'Stop'),
+          el('button',{class:'btn',onclick:async()=>{ if(!ck.size) return toast('Tick some files first'); await api('/api/cqueue/remove',{ids:[...ck]}); viewQueue(); }},'Remove ticked'),
+          el('button',{class:'btn',onclick:async()=>{ await api('/api/cqueue/remove',{all:true}); viewQueue(); }},'Remove all waiting')),
+        el('table',{}, el('thead',{},el('tr',{},...['','File','Size','Settings','Status'].map(h=>el('th',{},h)))), el('tbody',{},...rows)))
+      : el('div',{class:'empty'},'Nothing waiting. On a Large files list, tick files and use “Add to compression queue”.')),
+    q.done.length ? el('div',{class:'card'}, el('h2',{},'Finished'), el('div',{class:'toolbar'}, el('button',{class:'btn sm',onclick:async()=>{ await api('/api/cqueue/clear',{}); viewQueue(); }},'Clear finished list')),
+      el('table',{}, el('thead',{},el('tr',{},...['File','Size','Result','When'].map(h=>el('th',{},h)))), el('tbody',{},...drows))) : '');
+  clearInterval(S.qpoll); S.qpoll = setInterval(()=>{ if(S.tab!=='queue'){ clearInterval(S.qpoll); return; } if(!document.querySelector('.modal')) viewQueue(); }, 15000);
+}
+
 async function viewJobs(){
   const d = await api('/api/jobs'); const m = $('#main');
   const tb = el('tbody');
@@ -1323,6 +1445,7 @@ async function viewJobs(){
     const lastCell = last ? el('td',{}, el('span',{class:'pill '+(last.status==='done'?'ok':last.status==='error'?'bad':'warn')}, last.status),
         el('span',{class:'sub'}, (last.finished?fmtDate(last.finished):'')+(last.status==='done'?(p.family==='folders'?` · ${last.stats.groups} empty folders`+(last.stats.removed?`, ${last.stats.removed} removed`:''):(p.family==='health'?` · ${last.stats.groups} suspect videos`:` · ${last.stats.groups} groups`)):'')),
         last.message ? el('span',{class:'sub',title:last.message}, last.message.slice(0,60)) : '',
+        (last.status==='done' && last.finished && last.started) ? el('span',{class:'sub'}, 'Took '+fmtLen(last.finished-last.started)+(j.durations && j.durations.recent.length>1 ? ` · usually ${fmtLen(j.durations.avg)} · longest ${fmtLen(j.durations.max)}`:'')) : '',
         last.status==='done' ? el('button',{class:'btn sm',style:'margin-top:4px'+((p.family==='folders'&&p.auto_remove)?';opacity:.6':''),title:(p.family==='folders'&&p.auto_remove)?'Auto-delete job: the folders were already removed, so this list is normally empty':'',onclick:()=>{S.scanId=last.id;store.set('scanId',last.id);go('results')}},'Open results') : '')
       : el('td',{class:'mute'},'not run yet');
     tb.append(el('tr',{},
@@ -1343,11 +1466,13 @@ async function viewJobs(){
           try{ await api('/api/jobs/'+j.id+(c==='all'?'?results=1':''),undefined,'DELETE'); viewJobs(); }catch(x){toast(x.message)}
         }},'Delete')))));
   });
-  m.replaceChildren(el('div',{class:'card'}, el('h2',{},'Scheduled jobs'),
+  const tlBox = el('div',{});
+  m.replaceChildren(el('div',{class:'card'}, el('h2',{},'The week ahead'), tlBox), el('div',{class:'card'}, el('h2',{},'Scheduled jobs'),
     el('p',{class:'mute small'}, `Jobs scan at the times you choose (server clock: ${S.cfg.tz}), at low priority so the NAS stays responsive. They only find duplicates; you review and clean up on the Results tab. The newest runs of each job are kept and older ones are removed automatically.`),
     el('div',{class:'toolbar'}, el('button',{class:'btn primary',onclick:()=>{ toast('Set up the scan below, then click “Save as scheduled job…”',6000); go('scan'); }},'+ New scheduled job')),
     d.jobs.length ? el('table',{}, el('thead',{},el('tr',{},...['On','Job','Folders','Schedule','Last run','Keep','' ].map(h=>el('th',{},h)))), tb)
       : el('div',{class:'empty'},'No scheduled jobs yet. On the Scan tab, set up a scan and choose “Save as scheduled job…”.')));
+  drawTimeline(tlBox);
 }
 
 /* ---------- open a file ---------- */
@@ -1410,17 +1535,23 @@ function browseFolder(start, sc, onSel, onGone){
       bsz.disabled = true; sizeLine.textContent = 'Counting…';
       try{ info = await api('/api/foldersize?path='+encodeURIComponent(cur)); sizeLine.textContent = 'This folder holds '+stat(info); }catch(e){ sizeLine.textContent = e.message; }
       bsz.disabled = false; }},'How big is this folder?');
+    let lastPhase = '', pt0 = Date.now();
     const watchJob = async (what, msg) => {
       const stats = n => `${n.files.toLocaleString()}${n.total_files?' of '+n.total_files.toLocaleString():''} files · ${fmtSize(n.bytes)}${n.total_bytes?' of '+fmtSize(n.total_bytes):''}`;
       for(;;){
         await new Promise(r=>setTimeout(r,1000));
         let t; try{ t = await api('/api/folder/status'); }catch(e){ continue; }
         if(t.running){
-          const pc = t.total_bytes ? Math.min(100, t.bytes*100/t.total_bytes) : null;
+          if(t.phase!==lastPhase){ lastPhase = t.phase; pt0 = Date.now(); }
+          const pc = t.total_bytes ? Math.min(100, t.bytes*100/t.total_bytes) : null, working = ['copying','removing','deleting'].includes(t.phase);
+          const secs = Math.max(1,(Date.now()-pt0)/1000), spd = t.bytes/secs/1048576;
+          const title = {counting:'Counting what is inside…', copying:'Step 1 of 2: copying to the new place…', removing:'Step 2 of 2: removing the original (the copy is complete and checked)…', deleting:'Deleting…', moving:'Moving…'}[t.phase] || 'Working…';
           sizeLine.replaceChildren(el('div',{class:'warnbar',style:'display:block'},
-            el('b',{}, t.phase==='counting' ? 'Counting what is inside…' : t.phase==='deleting' ? 'Deleting… ' : t.phase==='moving' ? 'Moving… ' : 'Working… '),
-            t.phase==='deleting' ? el('span',{class:'mute'}, stats(t)+(pc!=null?` · ${pc.toFixed(0)}%`:'')) : '',
-            t.phase==='deleting' ? el('div',{style:'height:10px;background:var(--bg);border-radius:6px;overflow:hidden;margin-top:6px'}, el('div',{style:`height:100%;width:${pc==null?100:pc.toFixed(1)}%;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .5s`})) : ''));
+            el('div',{style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap'}, el('b',{}, title), el('span',{style:'flex:1'}),
+              t.phase==='copying' ? el('button',{class:'btn sm',onclick:()=>api('/api/folder/cancel',{})},'Cancel') : ''),
+            working ? el('div',{class:'mute small',style:'margin-top:4px'}, `${t.files.toLocaleString()}${t.total_files?' of '+t.total_files.toLocaleString():''} files · ${fmtSize(t.bytes)}${t.total_bytes?' of '+fmtSize(t.total_bytes):''}${pc!=null?' · '+pc.toFixed(0)+'%':''} · ${spd.toFixed(1)} MB/s`) : '',
+            working ? el('div',{style:'height:10px;background:var(--bg);border-radius:6px;overflow:hidden;margin-top:6px'}, el('div',{style:`height:100%;width:${pc==null?100:pc.toFixed(1)}%;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .5s`})) : '',
+            working && t.current ? el('div',{class:'mute small',style:'margin-top:4px;word-break:break-all'}, t.current) : ''));
           continue;
         }
         sizeLine.replaceChildren();
@@ -1524,7 +1655,7 @@ async function showFile(f){
   S.cfg = await api('/api/config');
   $('#ver').textContent = 'v' + S.cfg.version;
   document.title = 'ServerDedupe v' + S.cfg.version;
-  renderNav(); setSize(store.get('size','s'));
+  renderNav(); setSize(store.get('size','s')); refreshStrip(); setInterval(refreshStrip, 10000); $('#strip').onclick = () => go('jobs');
   const {running} = await api('/api/status');
   if(running) startPolling();
   go(S.scanId ? 'results' : 'scan');

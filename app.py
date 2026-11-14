@@ -1,6 +1,6 @@
 """ServerDedupe - duplicate file finder web app (Flask + SQLite)."""
 
-VERSION = "1.7.5"   # shown in the page header
+VERSION = "1.8.1"   # shown in the page header
 import csv
 import hashlib
 import io
@@ -26,8 +26,8 @@ import scanner
 DATA_ROOT = os.path.realpath(os.environ.get("DATA_ROOT", "/data"))
 TRASH_NAME = os.environ.get("TRASH_NAME", ".dedupe_trash")
 SMB_HOST = os.environ.get("SMB_HOST", "")        # name shown in Windows network paths; default = host in your browser address
+DSM_PORT = os.environ.get("DSM_PORT", "5000")
 START_SUBDIR = os.environ.get("START_SUBDIR", "")   # folder picker opens here (relative to DATA_ROOT); empty = the root
-START_SUBDIR = os.environ.get("START_SUBDIR", "homes")   # folder picker opens here (relative to DATA_ROOT)
 _start = os.path.join(DATA_ROOT, START_SUBDIR)
 START_PATH = _start if os.path.isdir(_start) else DATA_ROOT
 ALLOW_PERM = os.environ.get("ALLOW_PERMANENT_DELETE", "0") == "1"
@@ -40,6 +40,10 @@ DEFAULT_EXCLUDES = "@eaDir,#recycle,#snapshot,@tmp,@appdata,.git,node_modules"
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 db.init()
+_c0 = db.connect()
+_c0.execute("UPDATE cqueue SET state='queued' WHERE state='running'")
+_c0.commit()
+_c0.close()
 os.makedirs(THUMB_DIR, exist_ok=True)
 
 _lock = threading.Lock()
@@ -47,7 +51,7 @@ _current = None
 
 
 _fold = {"running": False, "action": "", "path": "", "phase": "", "files": 0, "bytes": 0, "total_files": 0, "total_bytes": 0,
-         "ok": None, "error": "", "warn": "", "state": "", "target": "", "id": 0}
+         "ok": None, "error": "", "warn": "", "state": "", "target": "", "id": 0, "current": "", "cancel": False, "started": 0}
 
 
 def busy():
@@ -720,7 +724,7 @@ def health_summary(sid):
     r = get_db().execute(
         "SELECT count(*) n, coalesce(sum(state='ok'),0) ok, coalesce(sum(state IN ('trashed','moved','compressed','deleted')),0) gone, "
         "coalesce(sum(selected=1 AND state='ok'),0) sel, coalesce(sum(CASE WHEN selected=1 AND state='ok' THEN size END),0) selbytes, "
-        "coalesce(sum(CASE WHEN state='ok' THEN size END),0) bytes FROM health WHERE scan_id=?", (sid,)).fetchone()
+        "coalesce(sum(CASE WHEN state='ok' THEN size END),0) bytes, coalesce(sum(state='queued'),0) queued FROM health WHERE scan_id=?", (sid,)).fetchone()
     kinds = {k["kind"]: k["n"] for k in get_db().execute(
         "SELECT kind, count(*) n FROM health WHERE scan_id=? AND state='ok' GROUP BY kind", (sid,))}
     exts = {}
@@ -731,7 +735,7 @@ def health_summary(sid):
         v[0] += 1
         v[1] += row["size"]
     return {"total": r["n"], "listed": r["ok"], "handled": r["gone"], "selected": r["sel"],
-            "selected_bytes": r["selbytes"], "bytes": r["bytes"], "kinds": kinds, "exts": exts}
+            "selected_bytes": r["selbytes"], "bytes": r["bytes"], "kinds": kinds, "exts": exts, "queued": r["queued"]}
 
 
 @app.get("/api/scans/<int:sid>/health")
@@ -822,7 +826,7 @@ def compress_start(sid):
         return err("Compressing is only available on a Large files scan")
     b = request.get_json(force=True, silent=True) or {}
     fmt = "zip" if b.get("format") == "zip" else "7z"
-    level = "fast" if b.get("level") == "fast" else "normal"
+    level = b.get("level") if b.get("level") in ("fast", "max") else "normal"
     if fmt == "7z" and not actions.sevenzip_exe():
         return err("7z is not installed in this container yet. Rebuild the image (see the README), or choose zip.", 400)
     if busy():
@@ -835,12 +839,12 @@ def compress_start(sid):
         if not n:
             return err("Nothing selected")
         _comp.update(running=True, sid=sid, total=n, done=0, saved=0, failed=0, errors=[], current="", cancel=False, fmt=fmt, total_bytes=0, done_bytes=0,
-                     cur_size=0, cur_phase="starting", cur_pct=None, started=time.time())
+                     cur_size=0, cur_phase="starting", cur_pct=None, started=time.time(), queue=False)
 
     def work():
         conn = db.connect()
         try:
-            actions.perform_compress(conn, sid, fmt, level, bool(b.get("keep")), DATA_ROOT, TRASH_NAME, _comp, lambda: _comp["cancel"])
+            actions.perform_compress(conn, sid, fmt, level, bool(b.get("keep")), DATA_ROOT, TRASH_NAME, _comp, lambda: _comp["cancel"], bool(b.get("full_cpu")))
         except Exception as e:  # noqa: BLE001
             _comp["errors"].append(f"{type(e).__name__}: {e}")
         finally:
@@ -1313,7 +1317,7 @@ def folder_act():
         if _fold["running"] or (_current is not None and _current.is_alive()) or _comp["running"]:
             return err("A scan, compression or another folder job is running. Wait for it to finish (or cancel it) first.", 409)
         _fold.update(running=True, action=action, path=rp, phase="starting", files=0, bytes=0, total_files=0, total_bytes=0,
-                     ok=None, error="", warn="", state="", target="", id=_fold["id"] + 1)
+                     ok=None, error="", warn="", state="", target="", id=_fold["id"] + 1, current="", cancel=False, started=time.time())
     threading.Thread(target=_folder_work, args=(rp, action, dest), daemon=True).start()
     return jsonify(started=True, id=_fold["id"])
 
@@ -1325,8 +1329,26 @@ def _folder_work(rp, action, dest):
     try:
         if action == "move":
             target = actions._unique(os.path.join(dest, os.path.basename(rp)))
-            st["phase"] = "moving"
-            shutil.move(rp, target)
+            try:
+                same = os.stat(rp).st_dev == os.stat(dest).st_dev and not os.environ.get("DEDUPE_FORCE_COPY")
+            except OSError:
+                same = False
+            if same:                                          # same filesystem: an instant rename
+                st["phase"] = "moving"
+                os.rename(rp, target)
+            else:                                             # different shared folder: copy everything, check it, THEN remove the original
+                st["phase"] = "counting"
+                n, size, d, cut = _folder_stats(rp, 120)
+                st.update(total_files=n, total_bytes=size, phase="copying", files=0, bytes=0)
+                try:
+                    _copy_tree(rp, target, st)
+                except BaseException:
+                    shutil.rmtree(target, ignore_errors=True)   # never leave a half copy behind; the original is untouched
+                    raise
+                st.update(phase="removing", files=0, bytes=0)
+                bad = _remove_tree(rp, st)
+                if os.path.exists(rp):
+                    st["warn"] = f"Copied to the new place, but {bad} item(s) in the original could not be removed (in use or no permission)."
             st.update(state="moved", target=target)
         elif action == "trash":
             st["phase"] = "counting"
@@ -1345,26 +1367,7 @@ def _folder_work(rp, action, dest):
             st["phase"] = "counting"
             n, size, d, cut = _folder_stats(rp, 60)
             st.update(total_files=n, total_bytes=size, phase="deleting")
-            bad = 0
-            for root, dirs, files in os.walk(rp, topdown=False):
-                for f in files:
-                    fp = os.path.join(root, f)
-                    try:
-                        sz = os.lstat(fp).st_size
-                        os.remove(fp)
-                        st["files"] += 1
-                        st["bytes"] += sz
-                    except OSError:
-                        bad += 1
-                for dn in dirs:
-                    try:
-                        os.rmdir(os.path.join(root, dn))
-                    except OSError:
-                        pass
-            try:
-                os.rmdir(rp)
-            except OSError:
-                pass
+            bad = _remove_tree(rp, st)
             if os.path.exists(rp):
                 raise OSError(f"{bad} item(s) could not be deleted (in use or no permission); the rest of the folder was removed")
             st["state"] = "deleted"
@@ -1387,6 +1390,74 @@ def _folder_work(rp, action, dest):
             st["ok"] = True
     finally:
         st["running"] = False
+
+
+def _copy_tree(src, dst, st):
+    """Copy a folder with progress, byte by byte for big files, checking each file's size. Stops cleanly on Cancel."""
+    import shutil
+    for root, dirs, files in os.walk(src):
+        rel = os.path.relpath(root, src)
+        droot = dst if rel == "." else os.path.join(dst, rel)
+        os.makedirs(droot, exist_ok=True)
+        for f in files:
+            if st["cancel"]:
+                raise InterruptedError("Cancelled. Nothing was moved; the original is untouched.")
+            sp, dp = os.path.join(root, f), os.path.join(droot, f)
+            if os.path.islink(sp):
+                os.symlink(os.readlink(sp), dp)
+                continue
+            st["current"] = f
+            with open(sp, "rb") as a, open(dp, "wb") as b:
+                while True:
+                    buf = a.read(8 << 20)
+                    if not buf:
+                        break
+                    b.write(buf)
+                    st["bytes"] += len(buf)
+                    if st["cancel"]:
+                        raise InterruptedError("Cancelled. Nothing was moved; the original is untouched.")
+            shutil.copystat(sp, dp)
+            if os.path.getsize(dp) != os.path.getsize(sp):
+                raise OSError(f"the copy of {f} is not the same size as the original, so nothing was removed")
+            st["files"] += 1
+    for root, dirs, files in os.walk(src):                      # folder dates, after their contents are in place
+        rel = os.path.relpath(root, src)
+        try:
+            shutil.copystat(root, dst if rel == "." else os.path.join(dst, rel))
+        except OSError:
+            pass
+
+
+def _remove_tree(rp, st):
+    """Delete a folder file by file with progress. Returns how many items could not be removed."""
+    bad = 0
+    for root, dirs, files in os.walk(rp, topdown=False):
+        for f in files:
+            fp = os.path.join(root, f)
+            try:
+                sz = os.lstat(fp).st_size
+                os.remove(fp)
+                st["files"] += 1
+                st["bytes"] += sz
+                st["current"] = f
+            except OSError:
+                bad += 1
+        for dn in dirs:
+            try:
+                os.rmdir(os.path.join(root, dn))
+            except OSError:
+                pass
+    try:
+        os.rmdir(rp)
+    except OSError:
+        pass
+    return bad
+
+
+@app.post("/api/folder/cancel")
+def folder_cancel():
+    _fold["cancel"] = True
+    return jsonify(ok=True)
 
 
 def _db_retry(fn, st):
@@ -1489,12 +1560,302 @@ def job_json(c, j):
     d = dict(j)
     d["params"] = json.loads(d["params"] or "{}")
     d["schedule"] = json.loads(d["schedule"] or "{}")
-    last = c.execute("SELECT id,status,finished,message,stats FROM scans WHERE job_id=? ORDER BY id DESC LIMIT 1", (j["id"],)).fetchone()
+    last = c.execute("SELECT id,status,started,finished,message,stats FROM scans WHERE job_id=? ORDER BY id DESC LIMIT 1", (j["id"],)).fetchone()
     if last:
-        d["last"] = {"id": last["id"], "status": last["status"], "finished": last["finished"], "message": last["message"],
+        d["last"] = {"id": last["id"], "status": last["status"], "started": last["started"], "finished": last["finished"], "message": last["message"],
                      "stats": json.loads(last["stats"] or "{}")}
+    secs = (_setting(c, f"dur_{j['id']}", {}) or {}).get("secs", [])
+    if secs:
+        d["durations"] = {"recent": secs[-8:], "last": secs[-1], "avg": sum(secs[-5:]) / len(secs[-5:]), "max": max(secs),
+                          "est": sorted(secs[-5:])[len(secs[-5:]) // 2]}
     d["runs"] = c.execute("SELECT count(*) FROM scans WHERE job_id=?", (j["id"],)).fetchone()[0]
     return d
+
+
+# ------------------------------------------------------------ settings, durations, compression queue
+def _setting(c, k, default=None):
+    r = c.execute("SELECT v FROM settings WHERE k=?", (k,)).fetchone()
+    if not r:
+        return default
+    try:
+        return json.loads(r[0])
+    except ValueError:
+        return default
+
+
+def _set(c, k, v):
+    c.execute("INSERT INTO settings(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", (k, json.dumps(v)))
+
+
+CQ_DEFAULT = {"enabled": False, "start": "23:00", "end": "06:00", "full_cpu": True}
+_cq = {"force": False}
+
+
+def cq_settings(c):
+    d = dict(CQ_DEFAULT)
+    d.update(_setting(c, "cq", {}) or {})
+    return d
+
+
+def _mins(hhmm):
+    h, m = hhmm.split(":")
+    return int(h) * 60 + int(m)
+
+
+def in_window(cfg, ts=None):
+    """True when the local time falls inside the compression window (a window like 23:00 to 06:00 crosses midnight)."""
+    from datetime import datetime
+    t = datetime.fromtimestamp(ts or time.time(), schedule.TZ)
+    now = t.hour * 60 + t.minute
+    a, b = _mins(cfg["start"]), _mins(cfg["end"])
+    if a == b:
+        return True
+    return (a <= now < b) if a < b else (now >= a or now < b)
+
+
+def next_window_start(cfg, ts=None):
+    from datetime import datetime, timedelta
+    ts = ts or time.time()
+    t = datetime.fromtimestamp(ts, schedule.TZ)
+    h, m = map(int, cfg["start"].split(":"))
+    cand = t.replace(hour=h, minute=m, second=0, microsecond=0)
+    if cand <= t:
+        cand += timedelta(days=1)
+    return cand.timestamp()
+
+
+def record_durations(c):
+    """Remember how long each job's finished runs took (kept even after old results are pruned)."""
+    for j in c.execute("SELECT id FROM jobs").fetchall():
+        key = f"dur_{j['id']}"
+        st = _setting(c, key, {}) or {}
+        rows = c.execute("SELECT id,started,finished FROM scans WHERE job_id=? AND status='done' AND id>? AND finished IS NOT NULL ORDER BY id",
+                         (j["id"], st.get("last_id", 0))).fetchall()
+        if rows:
+            secs = st.get("secs", []) + [max(1, r["finished"] - r["started"]) for r in rows]
+            _set(c, key, {"last_id": rows[-1]["id"], "secs": secs[-12:]})
+
+
+def _cq_summary(c):
+    r = c.execute("SELECT coalesce(sum(state='queued'),0) n, coalesce(sum(CASE WHEN state='queued' THEN size END),0) b, "
+                  "coalesce(sum(state='running'),0) run FROM cqueue").fetchone()
+    return {"waiting": r["n"], "bytes": r["b"], "running": r["run"]}
+
+
+def cq_tick():
+    """Start the next queued file when it is the right time and the server is free."""
+    if busy() or _comp["running"]:
+        return
+    c = db.connect()
+    try:
+        cfg = cq_settings(c)
+        if not _cq["force"] and not (cfg["enabled"] and in_window(cfg)):
+            return
+        it = c.execute("SELECT * FROM cqueue WHERE state='queued' ORDER BY id LIMIT 1").fetchone()
+        if not it:
+            _cq["force"] = False
+            return
+        now = time.time()
+        nxt = c.execute("SELECT min(next_run) FROM jobs WHERE enabled=1 AND next_run IS NOT NULL").fetchone()[0]
+        bps = float(_setting(c, "comp_bps", 700000) or 700000) * (2 if cfg["full_cpu"] else 1)
+        est = it["size"] / max(bps, 50000)
+        if nxt and 0 < nxt - now < est + 300:
+            return                                   # a scheduled scan is due before this file would finish: let the scan go first
+        with _lock:
+            if _comp["running"] or _fold["running"]:
+                return
+            _comp.update(running=True, sid=it["scan_id"], total=1, done=0, saved=0, failed=0, errors=[], current=os.path.basename(it["path"]),
+                         cancel=False, fmt=it["fmt"], total_bytes=it["size"], done_bytes=0, cur_size=it["size"], cur_phase="starting",
+                         cur_pct=None, started=now, queue=True)
+        c.execute("UPDATE cqueue SET state='running',started=? WHERE id=?", (now, it["id"]))
+        c.commit()
+        threading.Thread(target=_cq_run, args=(dict(it), cfg), daemon=True).start()
+    finally:
+        c.close()
+
+
+def _cq_run(it, cfg):
+    conn = db.connect()
+    t0 = time.time()
+    try:
+        row = {"hid": it["health_id"], "fid": it["file_id"], "path": it["path"], "size": it["size"], "mtime_ns": it["mtime_ns"]}
+        actions.perform_compress(conn, it["scan_id"], it["fmt"], it["level"], bool(it["keep"]), DATA_ROOT, TRASH_NAME, _comp,
+                                 lambda: _comp["cancel"], bool(cfg["full_cpu"]), rows=[row])
+        ok = _comp["done"] >= 1
+        cancelled = _comp["cancel"]
+        if cancelled:                                # Cancel also pauses the night queue so it does not carry straight on
+            cfg2 = cq_settings(conn)
+            cfg2["enabled"] = False
+            _set(conn, "cq", cfg2)
+            _cq["force"] = False
+        note = "" if ok else ("Cancelled" if cancelled else (_comp["errors"][0].split(": ", 1)[-1] if _comp["errors"] else "did not finish"))
+        saved = _comp["saved"] if ok else 0
+        conn.execute("UPDATE cqueue SET state=?,note=?,saved=?,finished=? WHERE id=?",
+                     ("done" if ok else "failed", note, saved, time.time(), it["id"]))
+        conn.execute("UPDATE health SET state='ok',selected=0 WHERE id=? AND state='queued'", (it["health_id"],))
+        if ok and time.time() - t0 > 5:
+            old = float(_setting(conn, "comp_bps", it["size"] / (time.time() - t0)))
+            _set(conn, "comp_bps", 0.6 * old + 0.4 * (it["size"] / (time.time() - t0) / (2 if cfg["full_cpu"] else 1)))
+        conn.commit()
+    except Exception as ex:  # noqa: BLE001
+        import traceback
+        traceback.print_exc()
+        try:
+            conn.execute("UPDATE cqueue SET state='failed',note=?,finished=? WHERE id=?", (f"{type(ex).__name__}: {ex}", time.time(), it["id"]))
+            conn.execute("UPDATE health SET state='ok',selected=0 WHERE id=? AND state='queued'", (it["health_id"],))
+            conn.commit()
+        except Exception:  # noqa: BLE001
+            pass
+    finally:
+        conn.close()
+        _comp["running"] = False
+        _comp["queue"] = False
+
+
+@app.post("/api/cqueue/add")
+def cq_add():
+    """Add the ticked files of a large-files scan to the compression queue (runs later, in the night window)."""
+    b = request.get_json(force=True, silent=True) or {}
+    sid = int(b.get("scan_id", 0))
+    if scan_row(sid)["mode"] != "large_files":
+        return err("Queueing is only available on a Large files scan")
+    fmt = "zip" if b.get("format") == "zip" else "7z"
+    level = b.get("level") if b.get("level") in ("fast", "max") else "normal"
+    if fmt == "7z" and not actions.sevenzip_exe():
+        return err("7z is not installed in this container yet. Use the Install 7z button, or choose zip.", 400)
+    c = get_db()
+    rows = c.execute("SELECT h.id,h.file_id,h.path,h.size,h.mtime_ns FROM health h LEFT JOIN files f ON f.id=h.file_id "
+                     "WHERE h.scan_id=? AND h.selected=1 AND h.state='ok' AND COALESCE(f.protected,0)=0 ORDER BY h.size DESC", (sid,)).fetchall()
+    if not rows:
+        return err("Nothing selected")
+    now = time.time()
+    for r in rows:
+        c.execute("INSERT INTO cqueue(scan_id,health_id,file_id,path,size,mtime_ns,fmt,level,keep,added) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                  (sid, r["id"], r["file_id"], r["path"], r["size"], r["mtime_ns"], fmt, level, 1 if b.get("keep") else 0, now))
+        c.execute("UPDATE health SET state='queued',selected=0 WHERE id=?", (r["id"],))
+    c.commit()
+    return jsonify(added=len(rows), bytes=sum(r["size"] for r in rows), summary=health_summary(sid), queue=_cq_summary(c))
+
+
+@app.get("/api/cqueue")
+def cq_list():
+    c = get_db()
+    items = [dict(r) for r in c.execute("SELECT * FROM cqueue WHERE state IN ('queued','running') ORDER BY id")]
+    done = [dict(r) for r in c.execute("SELECT * FROM cqueue WHERE state NOT IN ('queued','running') ORDER BY finished DESC LIMIT 100")]
+    cfg = cq_settings(c)
+    bps = float(_setting(c, "comp_bps", 700000) or 700000) * (2 if cfg["full_cpu"] else 1)
+    return jsonify(items=items, done=done, settings=cfg, summary=_cq_summary(c), in_window=in_window(cfg), force=_cq["force"],
+                   next_window=next_window_start(cfg), speed_bps=bps, now=time.time(), tz=schedule.TZ_NAME)
+
+
+@app.post("/api/cqueue/remove")
+def cq_remove():
+    b = request.get_json(force=True, silent=True) or {}
+    c = get_db()
+    ids = [int(i) for i in b.get("ids", [])] if not b.get("all") else [r[0] for r in c.execute("SELECT id FROM cqueue WHERE state='queued'")]
+    n = 0
+    for i in ids:
+        r = c.execute("SELECT health_id FROM cqueue WHERE id=? AND state='queued'", (i,)).fetchone()
+        if r:
+            c.execute("UPDATE health SET state='ok',selected=0 WHERE id=? AND state='queued'", (r["health_id"],))
+            c.execute("DELETE FROM cqueue WHERE id=?", (i,))
+            n += 1
+    c.commit()
+    return jsonify(removed=n, summary=_cq_summary(c))
+
+
+@app.post("/api/cqueue/clear")
+def cq_clear():
+    c = get_db()
+    c.execute("DELETE FROM cqueue WHERE state NOT IN ('queued','running')")
+    c.commit()
+    return jsonify(ok=True)
+
+
+@app.post("/api/cqueue/settings")
+def cq_save_settings():
+    b = request.get_json(force=True, silent=True) or {}
+    try:
+        cfg = {"enabled": bool(b.get("enabled")), "start": schedule._hhmm(b.get("start"), "Start time"),
+               "end": schedule._hhmm(b.get("end"), "End time"), "full_cpu": bool(b.get("full_cpu"))}
+    except ValueError as e:
+        return err(str(e))
+    c = get_db()
+    _set(c, "cq", cfg)
+    c.commit()
+    return jsonify(settings=cfg)
+
+
+@app.post("/api/cqueue/run-now")
+def cq_run_now():
+    """Work through the queue now, outside the night window (stops when the queue is empty)."""
+    if not _cq_summary(get_db())["waiting"]:
+        return err("The queue is empty")
+    _cq["force"] = True
+    try:
+        cq_tick()
+    except Exception as ex:  # noqa: BLE001
+        return err(str(ex), 500)
+    return jsonify(ok=True)
+
+
+@app.post("/api/cqueue/stop")
+def cq_stop():
+    _cq["force"] = False
+    return jsonify(ok=True)
+
+
+@app.get("/api/overview")
+def overview():
+    """One-line picture of what the server is doing and what comes next (shown at the top of every page)."""
+    c = get_db()
+    now = time.time()
+    run = None
+    r = c.execute(SCAN_SQL + " WHERE s.status IN ('running','queued') ORDER BY s.id DESC LIMIT 1").fetchone()
+    if r:
+        run = {"kind": "scan", "label": f"Scan #{r['id']}" + (f" ({r['job_name']})" if r["job_name"] else ""), "since": r["started"]}
+    elif _comp["running"]:
+        run = {"kind": "compress", "since": _comp.get("started"), "label": ("Compression queue: " if _comp.get("queue") else "Compressing: ")
+               + f"{_comp.get('current') or '…'} ({min(_comp['total'], _comp['done'] + _comp['failed'] + 1)} of {_comp['total']})"}
+    elif _fold["running"]:
+        run = {"kind": "folder", "label": f"Folder {_fold['action']}: {os.path.basename(_fold['path'])}", "since": None}
+    elif _tool["running"]:
+        run = {"kind": "install", "label": "Installing 7z", "since": None}
+    j = c.execute("SELECT name,next_run FROM jobs WHERE enabled=1 AND next_run IS NOT NULL ORDER BY next_run LIMIT 1").fetchone()
+    cfg = cq_settings(c)
+    q = _cq_summary(c)
+    return jsonify(now=now, running=run, next={"name": j["name"], "at": j["next_run"]} if j else None,
+                   queue={"waiting": q["waiting"], "bytes": q["bytes"], "enabled": cfg["enabled"], "in_window": in_window(cfg),
+                          "start": cfg["start"], "end": cfg["end"], "next_start": next_window_start(cfg)})
+
+
+@app.get("/api/schedule/timeline")
+def schedule_timeline():
+    """Every scheduled start in the coming days, with an estimated length from past runs, for the week view."""
+    from datetime import datetime, timedelta
+    c = get_db()
+    now = time.time()
+    t0 = datetime.fromtimestamp(now, schedule.TZ).replace(hour=0, minute=0, second=0, microsecond=0)
+    days = max(1, min(14, request.args.get("days", 7, int)))
+    end = (t0 + timedelta(days=days)).timestamp()
+    out = []
+    for j in c.execute("SELECT * FROM jobs WHERE enabled=1").fetchall():
+        sched = json.loads(j["schedule"] or "{}")
+        params = json.loads(j["params"] or "{}")
+        d = job_json(c, j).get("durations")
+        starts, cur = [], t0.timestamp() - 1
+        for _ in range(60):
+            nx = schedule.next_run_time(sched, cur)
+            if nx is None or nx >= end:
+                break
+            starts.append(nx)
+            cur = nx
+        out.append({"id": j["id"], "name": j["name"], "family": params.get("family"), "starts": starts,
+                    "est": d["est"] if d else None, "max": d["max"] if d else None, "stop_at": sched.get("stop_at")})
+    cfg = cq_settings(c)
+    q = _cq_summary(c)
+    return jsonify(now=now, start=t0.timestamp(), days=days, jobs=out, tz=schedule.TZ_NAME,
+                   window={"enabled": cfg["enabled"], "start": cfg["start"], "end": cfg["end"]}, queue=q)
 
 
 def read_job_body(b):
@@ -1645,8 +2006,12 @@ def scheduler_tick():
         due = c.execute("SELECT * FROM jobs WHERE enabled=1 AND next_run IS NOT NULL AND next_run<=? ORDER BY next_run", (now,)).fetchall()
         for j in due:
             sched = json.loads(j["schedule"])
-            if now > j["next_run"] + schedule.GRACE:            # missed (server off / busy): wait for the next slot
+            if now > j["next_run"] + schedule.GRACE:            # missed (server off / busy): wait for the next slot, and say so
                 nxt = schedule.next_run_time(sched, now)
+                pj = json.loads(j["params"])
+                c.execute("INSERT INTO scans(started,finished,status,mode,params,phase,message,job_id,source) VALUES(?,?,?,?,?,?,?,?,?)",
+                          (now, now, "skipped", pj.get("mode", ""), j["params"], "finished",
+                           "Skipped: it could not start within 3 hours of its time (the server was busy with another job, or switched off).", j["id"], "schedule"))
                 c.execute("UPDATE jobs SET next_run=?,enabled=? WHERE id=?", (nxt, 1 if nxt else 0, j["id"]))
                 continue
             if busy():
@@ -1665,9 +2030,12 @@ def scheduler_tick():
             c.execute("UPDATE jobs SET last_run=?,last_scan_id=?,next_run=?,enabled=? WHERE id=?", (now, sid, nxt, 1 if nxt else 0, j["id"]))
         c.commit()
         if not busy():
+            record_durations(c)
+            c.commit()
             prune_runs(c)
     finally:
         c.close()
+    cq_tick()
 
 
 def scheduler_loop():
