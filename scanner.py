@@ -166,6 +166,7 @@ class Scanner(threading.Thread):
         self.errors = []
         self.err_count = 0
         self.file_count = 0
+        self.dir_count = 0
         self.cache_hits = 0
 
     # --- bookkeeping
@@ -246,7 +247,7 @@ class Scanner(threading.Thread):
             traceback.print_exc()
             status, msg = "error", f"{type(e).__name__}: {e}"
         finally:
-            stats = {"files": self.file_count, "groups": groups, "removed": removed, "ignored_groups": GroupWriter.ignored, "cache_hits": self.cache_hits, "errors": self.err_count,
+            stats = {"files": self.file_count, "folders": self.dir_count, "groups": groups, "removed": removed, "ignored_groups": GroupWriter.ignored, "cache_hits": self.cache_hits, "errors": self.err_count,
                      "error_samples": self.errors, "seconds": round(time.time() - t0, 1)}
             try:
                 self._set(status=status, finished=time.time(), message=msg,
@@ -333,6 +334,7 @@ class Scanner(threading.Thread):
         if batch:
             self.conn.executemany(sql, batch)
             self.conn.commit()
+        self.dir_count = len(visited)
         self.file_count = self.conn.execute("SELECT count(*) FROM files WHERE scan_id=?", (self.scan_id,)).fetchone()[0]
         self._progress("scanning folders", self.file_count, self.file_count, f"{self.file_count:,} files found", force=True)
 

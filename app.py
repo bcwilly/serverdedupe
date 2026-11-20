@@ -1,6 +1,6 @@
 """ServerDedupe - duplicate file finder web app (Flask + SQLite)."""
 
-VERSION = "1.8.1"   # shown in the page header
+VERSION = "1.8.5"   # shown in the page header
 import csv
 import hashlib
 import io
@@ -752,6 +752,8 @@ def list_health(sid):
     fs, fa = _health_filters(q, kind, ext, "h.")
     sql += fs
     args += fa
+    if request.args.get("sel") == "1":
+        sql += " AND h.selected=1"
     rows = get_db().execute(sql + " ORDER BY h.sev DESC, h.size DESC, h.path LIMIT ? OFFSET ?", (*args, lim, off)).fetchall()
     out = []
     for r in rows:
@@ -844,7 +846,7 @@ def compress_start(sid):
     def work():
         conn = db.connect()
         try:
-            actions.perform_compress(conn, sid, fmt, level, bool(b.get("keep")), DATA_ROOT, TRASH_NAME, _comp, lambda: _comp["cancel"], bool(b.get("full_cpu")))
+            actions.perform_compress(conn, sid, fmt, level, bool(b.get("keep")), DATA_ROOT, TRASH_NAME, _comp, lambda: _comp["cancel"], actions.cpu_mode(b.get("full_cpu")))
         except Exception as e:  # noqa: BLE001
             _comp["errors"].append(f"{type(e).__name__}: {e}")
         finally:
@@ -1525,28 +1527,41 @@ def db_meta(fid):
 
 
 # ------------------------------------------------------------ quarantine
+def _trash_where(q):
+    sql, args = _path_filter("orig_path", q or "")
+    return "restored=0 AND purged=0" + sql, args
+
+
 @app.get("/api/trash")
 def trash_list():
-    rows = get_db().execute("SELECT * FROM trash WHERE restored=0 AND purged=0 ORDER BY ts DESC LIMIT 2000").fetchall()
-    tot = get_db().execute("SELECT count(*), coalesce(sum(size),0) FROM trash WHERE restored=0 AND purged=0").fetchone()
-    return jsonify(items=[dict(r) for r in rows], count=tot[0], bytes=tot[1])
+    c = get_db()
+    q = request.args.get("q", "")
+    where, args = _trash_where(q)
+    rows = c.execute(f"SELECT * FROM trash WHERE {where} ORDER BY ts DESC LIMIT 2000", args).fetchall()
+    tot = c.execute("SELECT count(*), coalesce(sum(size),0) FROM trash WHERE restored=0 AND purged=0").fetchone()
+    mat = c.execute(f"SELECT count(*), coalesce(sum(size),0) FROM trash WHERE {where}", args).fetchone()
+    return jsonify(items=[dict(r) for r in rows], count=tot[0], bytes=tot[1], matches=mat[0], match_bytes=mat[1])
+
+
+def _trash_ids(b):
+    """Ids from an explicit list, or every item matching the filter text q (all=true)."""
+    c = get_db()
+    if b.get("all"):
+        where, args = _trash_where(b.get("q", ""))
+        return [r[0] for r in c.execute(f"SELECT id FROM trash WHERE {where}", args)]
+    return [int(i) for i in b.get("ids", [])]
 
 
 @app.post("/api/trash/restore")
 def trash_restore():
-    ids = (request.get_json(force=True, silent=True) or {}).get("ids", [])
-    return jsonify(actions.restore(get_db(), [int(i) for i in ids]))
+    b = request.get_json(force=True, silent=True) or {}
+    return jsonify(actions.restore(get_db(), _trash_ids(b)))
 
 
 @app.post("/api/trash/purge")
 def trash_purge():
     b = request.get_json(force=True, silent=True) or {}
-    c = get_db()
-    if b.get("all"):
-        ids = [r[0] for r in c.execute("SELECT id FROM trash WHERE restored=0 AND purged=0")]
-    else:
-        ids = [int(i) for i in b.get("ids", [])]
-    return jsonify(actions.purge(c, ids))
+    return jsonify(actions.purge(get_db(), _trash_ids(b)))
 
 
 # ------------------------------------------------------------ scheduled jobs
@@ -1587,13 +1602,14 @@ def _set(c, k, v):
     c.execute("INSERT INTO settings(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", (k, json.dumps(v)))
 
 
-CQ_DEFAULT = {"enabled": False, "start": "23:00", "end": "06:00", "full_cpu": True}
+CQ_DEFAULT = {"enabled": False, "start": "23:00", "end": "06:00", "full_cpu": "balanced"}
 _cq = {"force": False}
 
 
 def cq_settings(c):
     d = dict(CQ_DEFAULT)
     d.update(_setting(c, "cq", {}) or {})
+    d["full_cpu"] = "high" if d.get("full_cpu") is True else actions.cpu_mode(d.get("full_cpu"))   # an old tick-box "full" becomes "high"
     return d
 
 
@@ -1657,7 +1673,7 @@ def cq_tick():
             return
         now = time.time()
         nxt = c.execute("SELECT min(next_run) FROM jobs WHERE enabled=1 AND next_run IS NOT NULL").fetchone()[0]
-        bps = float(_setting(c, "comp_bps", 700000) or 700000) * (2 if cfg["full_cpu"] else 1)
+        bps = float(_setting(c, "comp_bps", 700000) or 700000) * actions.CPU_MODES[cfg["full_cpu"]][2]
         est = it["size"] / max(bps, 50000)
         if nxt and 0 < nxt - now < est + 300:
             return                                   # a scheduled scan is due before this file would finish: let the scan go first
@@ -1680,7 +1696,7 @@ def _cq_run(it, cfg):
     try:
         row = {"hid": it["health_id"], "fid": it["file_id"], "path": it["path"], "size": it["size"], "mtime_ns": it["mtime_ns"]}
         actions.perform_compress(conn, it["scan_id"], it["fmt"], it["level"], bool(it["keep"]), DATA_ROOT, TRASH_NAME, _comp,
-                                 lambda: _comp["cancel"], bool(cfg["full_cpu"]), rows=[row])
+                                 lambda: _comp["cancel"], cfg["full_cpu"], rows=[row])
         ok = _comp["done"] >= 1
         cancelled = _comp["cancel"]
         if cancelled:                                # Cancel also pauses the night queue so it does not carry straight on
@@ -1695,7 +1711,7 @@ def _cq_run(it, cfg):
         conn.execute("UPDATE health SET state='ok',selected=0 WHERE id=? AND state='queued'", (it["health_id"],))
         if ok and time.time() - t0 > 5:
             old = float(_setting(conn, "comp_bps", it["size"] / (time.time() - t0)))
-            _set(conn, "comp_bps", 0.6 * old + 0.4 * (it["size"] / (time.time() - t0) / (2 if cfg["full_cpu"] else 1)))
+            _set(conn, "comp_bps", 0.6 * old + 0.4 * (it["size"] / (time.time() - t0) / actions.CPU_MODES[cfg["full_cpu"]][2]))
         conn.commit()
     except Exception as ex:  # noqa: BLE001
         import traceback
@@ -1743,7 +1759,7 @@ def cq_list():
     items = [dict(r) for r in c.execute("SELECT * FROM cqueue WHERE state IN ('queued','running') ORDER BY id")]
     done = [dict(r) for r in c.execute("SELECT * FROM cqueue WHERE state NOT IN ('queued','running') ORDER BY finished DESC LIMIT 100")]
     cfg = cq_settings(c)
-    bps = float(_setting(c, "comp_bps", 700000) or 700000) * (2 if cfg["full_cpu"] else 1)
+    bps = float(_setting(c, "comp_bps", 700000) or 700000) * actions.CPU_MODES[cfg["full_cpu"]][2]
     return jsonify(items=items, done=done, settings=cfg, summary=_cq_summary(c), in_window=in_window(cfg), force=_cq["force"],
                    next_window=next_window_start(cfg), speed_bps=bps, now=time.time(), tz=schedule.TZ_NAME)
 
@@ -1777,7 +1793,7 @@ def cq_save_settings():
     b = request.get_json(force=True, silent=True) or {}
     try:
         cfg = {"enabled": bool(b.get("enabled")), "start": schedule._hhmm(b.get("start"), "Start time"),
-               "end": schedule._hhmm(b.get("end"), "End time"), "full_cpu": bool(b.get("full_cpu"))}
+               "end": schedule._hhmm(b.get("end"), "End time"), "full_cpu": actions.cpu_mode(b.get("full_cpu"))}
     except ValueError as e:
         return err(str(e))
     c = get_db()

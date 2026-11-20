@@ -1006,7 +1006,7 @@ async function viewHealth(sc){
   await load(true);
 }
 async function viewLarge(sc){
-  const m = $('#main'); let q = '', kind = '', ext = '', loaded = 0, sum = null, top = 0, poll = null, seen = false;
+  const m = $('#main'); let q = '', kind = '', ext = '', selOnly = false, loaded = 0, sum = null, top = 0, poll = null, seen = false;
   const chips = el('div',{class:'chips'}), list = el('div',{class:'card',style:'padding:0'});
   const more = el('button',{class:'btn hide',onclick:()=>load(false)},'Load more');
   const filter = el('input',{type:'text',placeholder:'Filter: name, folder, or *.pst;*.mov',title:'Type part of a name or folder, or use * as a wildcard: *.pst  or  *.pst;*.mov',style:'width:260px'});
@@ -1019,7 +1019,7 @@ async function viewLarge(sc){
   const fmt = el('select',{style:'width:auto'}, el('option',{value:'7z',disabled:!has7z,selected:has7z},'7z (best compression)'+(has7z?'':' — not installed yet')), el('option',{value:'zip',selected:!has7z},'zip (opens anywhere)'));
   const level = el('select',{style:'width:auto'}, el('option',{value:'normal'},'Normal'), el('option',{value:'max'},'Maximum (smallest, slowest)'), el('option',{value:'fast'},'Fast (less squeezing, easier on the NAS)'));
   const keep = el('input',{type:'checkbox'});
-  const fullcpu = el('input',{type:'checkbox'});
+  const fullcpu = cpuSel('balanced');
   const prog = el('div',{class:'hide',style:'margin:8px 0'});
   const inst = el('button',{class:'btn',title:'Downloads and installs the 7z program inside this container (needs internet; takes a minute). Nothing else changes.',onclick:async()=>{
     inst.disabled = true; inst.textContent = 'Installing 7z…';
@@ -1051,7 +1051,7 @@ async function viewLarge(sc){
     if(!sum) return;
     chips.replaceChildren(el('div',{class:'chip'},el('b',{},sum.listed.toLocaleString()),'big files listed'),
       el('div',{class:'chip'},el('b',{},fmtSize(sum.bytes)),'in those files'),
-      el('div',{class:'chip sel'},el('b',{},sum.selected.toLocaleString()+' · '+fmtSize(sum.selected_bytes)),'selected'),
+      el('div',{class:'chip sel',style:'cursor:pointer;'+(selOnly?'outline:2px solid var(--accent)':''),title:selOnly?'Showing only the selected files. Click to show all again.':'Click to show only the files that are selected (to check exactly what an action will touch)',onclick:()=>{ selOnly = !selOnly; load(true); }},el('b',{},sum.selected.toLocaleString()+' · '+fmtSize(sum.selected_bytes)),selOnly?'selected (showing only these)':'selected · click to show only these'),
       sum.handled ? el('div',{class:'chip'},el('b',{},sum.handled.toLocaleString()),'moved / quarantined') : '',
       sum.queued ? el('div',{class:'chip',style:'cursor:pointer',title:'Open the Compress queue tab',onclick:()=>go('queue')},el('b',{},sum.queued.toLocaleString()),'in the compression queue') : '');
     const cur = kindSel.value;
@@ -1064,7 +1064,7 @@ async function viewLarge(sc){
   async function pickTop(n){
     try{
       await api('/api/scans/'+sc.id+'/health/select',{selected:false,q,kind});
-      const d = await api(`/api/scans/${sc.id}/health?offset=0&limit=${n}&q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}&ext=${encodeURIComponent(ext)}`);
+      const d = await api(`/api/scans/${sc.id}/health?offset=0&limit=${n}&q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}&ext=${encodeURIComponent(ext)}${selOnly?'&sel=1':''}`);
       sum = (await api('/api/scans/'+sc.id+'/health/select',{ids:d.files.filter(f=>!f.protected).map(f=>f.id),selected:true})).summary; draw(); load(true);
     }catch(e){ toast(e.message) }
   }
@@ -1094,7 +1094,7 @@ async function viewLarge(sc){
   function resetDel(){ delBtn.className = 'btn'; delBtn.style.cssText = 'border-color:var(--danger);color:var(--danger)'; delBtn.textContent = 'Delete permanently'; }
   async function compress(){
     if(!sum || !sum.selected) return toast('Nothing selected');
-    try{ await api('/api/scans/'+sc.id+'/health/compress',{format:fmt.value,level:level.value,keep:keep.checked,full_cpu:fullcpu.checked}); toast('Compression started. It runs in the background; you can leave this page.'); watch(); }
+    try{ await api('/api/scans/'+sc.id+'/health/compress',{format:fmt.value,level:level.value,keep:keep.checked,full_cpu:fullcpu.value}); toast('Compression started. It runs in the background; you can leave this page.'); watch(); }
     catch(e){ toast(e.message, 8000) }
   }
   async function enqueue(){
@@ -1139,7 +1139,7 @@ async function viewLarge(sc){
   }
   async function load(reset){
     if(reset){ loaded = 0; list.replaceChildren(); }
-    const d = await api(`/api/scans/${sc.id}/health?offset=${loaded}&limit=100&q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}&ext=${encodeURIComponent(ext)}`);
+    const d = await api(`/api/scans/${sc.id}/health?offset=${loaded}&limit=100&q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}&ext=${encodeURIComponent(ext)}${selOnly?'&sel=1':''}`);
     sum = d.summary; draw();
     if(reset) top = d.files.length ? d.files[0].size : top;
     d.files.forEach(f => {
@@ -1172,7 +1172,7 @@ async function viewLarge(sc){
     el('div',{class:'toolbar'}, mk('Move to quarantine','danger',()=>act('trash')), mk('Move to folder…','',()=>act('move')), delBtn,
       el('span',{class:'mute small'}, 'Delete permanently skips the quarantine and cannot be undone (you will be asked to click once more to confirm).')),
     el('div',{class:'toolbar'}, el('b',{},'Compress selected:'), fmt, has7z ? '' : inst, level,
-      el('label',{style:'display:flex;gap:6px;align-items:center;color:var(--text)',title:'Uses every processor core and normal priority. Much faster, but the NAS (Jellyfin, DSM, other apps) may feel slow while it runs. Off = 2 cores at the lowest priority.'}, fullcpu, 'Use full CPU (faster, may slow the NAS)'),
+      el('label',{style:'display:flex;gap:6px;align-items:center;color:var(--text)'}, 'CPU use', fullcpu),
       el('label',{style:'display:flex;gap:6px;align-items:center;color:var(--text)',title:'Leave the original where it is as well as the new archive. Off by default: the original is moved to the quarantine so you can restore it.'}, keep, 'Keep the original too'),
       mk('Compress now','primary',compress), mk('Add to compression queue','',enqueue),
       el('span',{class:'mute small'}, 'Makes “name.7z” (or .zip) beside each file, tests it, then moves the original to quarantine. Slow on a NAS, so it runs in the background. Photos, video, music and zips barely shrink.')),
@@ -1230,20 +1230,45 @@ function showErrors(errs){
 
 /* ---------- quarantine ---------- */
 async function viewTrash(){
-  const m = $('#main'); const d = await api('/api/trash');
+  const m = $('#main'); let timer = null, d = null;
   const checks = new Set();
-  const tb = el('tbody');
-  d.items.forEach(i => tb.append(el('tr',{},
-    el('td',{},el('input',{type:'checkbox',onchange:e=>e.target.checked?checks.add(i.id):checks.delete(i.id)})),
-    el('td',{style:'word-break:break-all'},i.orig_path), el('td',{},fmtSize(i.size)), el('td',{class:'mute'},fmtDate(i.ts)))));
-  const run = async (url, body, msg) => { const r = await api(url, body); toast(`${r.done} ${msg}`+(r.errors.length?`, ${r.errors.length} problems`:'')); if(r.errors.length) showErrors(r.errors); viewTrash(); };
-  m.replaceChildren(el('div',{class:'card'}, el('h2',{},`Quarantine — ${d.count.toLocaleString()} files, ${fmtSize(d.bytes)}`),
-    el('p',{class:'mute small'},'Removed duplicates wait here (a hidden “'+S.cfg.trash_name+'” folder inside each shared folder) until you empty it. Restore puts a file back where it came from.'),
-    el('div',{class:'toolbar'},
-      el('button',{class:'btn',onclick:()=>checks.size?run('/api/trash/restore',{ids:[...checks]},'restored'):toast('Tick some files first')},'Restore selected'),
-      el('button',{class:'btn',onclick:()=>{ if(!checks.size) return toast('Tick some files first'); if(confirm(`Permanently delete ${checks.size} files?`)) run('/api/trash/purge',{ids:[...checks]},'deleted'); }},'Delete selected forever'),
-      el('button',{class:'btn danger',onclick:()=>{ if(d.count && confirm(`Permanently delete ALL ${d.count} quarantined files (${fmtSize(d.bytes)})?`)) run('/api/trash/purge',{all:true},'deleted'); }},'Empty quarantine')),
-    d.items.length ? el('table',{}, el('thead',{},el('tr',{},el('th',{}),el('th',{},'Original location'),el('th',{},'Size'),el('th',{},'Removed'))), tb) : el('div',{class:'empty'},'Quarantine is empty.')));
+  const q = el('input',{type:'search',placeholder:'Find in quarantine: resume.doc   or   *.doc;*.xls   or   corrupt.mov',style:'flex:1;min-width:260px',title:'Plain text matches anywhere in the original path. * and ? are wildcards. Separate several searches with ; or , or |.'});
+  q.value = store.get('trashQ','') || '';
+  const head = el('h2'), info = el('p',{class:'mute small'}), tbl = el('div'), bar = el('div',{class:'toolbar'});
+  const all = el('input',{type:'checkbox',title:'Tick / untick everything shown'});
+  const run = async (url, body, msg) => { const r = await api(url, body); toast(`${r.done} ${msg}`+(r.errors.length?`, ${r.errors.length} problems`:'')); if(r.errors.length) showErrors(r.errors); checks.clear(); load(); };
+  const filtered = () => q.value.trim() !== '';
+  async function load(){
+    try{ d = await api('/api/trash?q='+encodeURIComponent(q.value)); }catch(e){ return toast(e.message); }
+    store.set('trashQ', q.value);
+    head.textContent = `Quarantine — ${d.count.toLocaleString()} files, ${fmtSize(d.bytes)}`;
+    const tb = el('tbody'); all.checked = false;
+    d.items.forEach(i => tb.append(el('tr',{},
+      el('td',{},el('input',{type:'checkbox',checked:checks.has(i.id),onchange:e=>{ e.target.checked?checks.add(i.id):checks.delete(i.id); upd(); }})),
+      el('td',{style:'word-break:break-all'},i.orig_path), el('td',{},fmtSize(i.size)), el('td',{class:'mute'},fmtDate(i.ts)))));
+    tb.querySelectorAll('tr').forEach(r => {});
+    tbl.replaceChildren(d.items.length ? el('table',{}, el('thead',{},el('tr',{},el('th',{},all),el('th',{},'Original location'),el('th',{},'Size'),el('th',{},'Removed'))), tb)
+                                       : el('div',{class:'empty'}, d.count ? 'Nothing in quarantine matches that search.' : 'Quarantine is empty.'));
+    all.onchange = () => { tb.querySelectorAll('tr').forEach((r,k) => { const cb = r.querySelector('input'); cb.checked = all.checked; all.checked ? checks.add(d.items[k].id) : checks.delete(d.items[k].id); }); upd(); };
+    upd();
+  }
+  function upd(){
+    const n = checks.size;
+    info.textContent = filtered() ? `${d.matches.toLocaleString()} match (${fmtSize(d.match_bytes)})`+(d.matches>d.items.length?` — showing the first ${d.items.length.toLocaleString()}; the "all matching" buttons still cover every match`:'')
+                                  : 'Removed duplicates wait here (a hidden “'+S.cfg.trash_name+'” folder inside each shared folder) until you empty it. Restore puts a file back where it came from.';
+    const mk = (t, cls, fn) => el('button',{class:'btn '+cls,onclick:fn}, t);
+    const none = () => toast('Tick some files first');
+    const mt = d.matches.toLocaleString();
+    bar.replaceChildren(
+      mk(`Restore selected${n?' ('+n+')':''}`,'',()=>n?run('/api/trash/restore',{ids:[...checks]},'restored'):none()),
+      mk(`Delete selected forever${n?' ('+n+')':''}`,'',()=>{ if(!n) return none(); if(confirm(`Permanently delete ${n} files?`)) run('/api/trash/purge',{ids:[...checks]},'deleted'); }),
+      filtered() ? mk(`Restore all ${mt} matching`,'',()=>{ if(d.matches && confirm(`Restore all ${mt} files matching "${q.value}" to where they came from?`)) run('/api/trash/restore',{all:true,q:q.value},'restored'); }) : '',
+      filtered() ? mk(`Delete all ${mt} matching forever`,'danger',()=>{ if(d.matches && confirm(`Permanently delete all ${mt} files matching "${q.value}" (${fmtSize(d.match_bytes)})? This cannot be undone.`)) run('/api/trash/purge',{all:true,q:q.value},'deleted'); })
+                 : mk('Empty quarantine','danger',()=>{ if(d.count && confirm(`Permanently delete ALL ${d.count} quarantined files (${fmtSize(d.bytes)})?`)) run('/api/trash/purge',{all:true,q:''},'deleted'); }));
+  }
+  q.oninput = () => { clearTimeout(timer); timer = setTimeout(() => { checks.clear(); load(); }, 250); };
+  m.replaceChildren(el('div',{class:'card'}, head, el('div',{class:'toolbar'}, q, el('button',{class:'btn',onclick:()=>{ q.value=''; checks.clear(); load(); }},'Clear')), info, bar, tbl));
+  load();
 }
 
 /* ---------- history ---------- */
@@ -1403,11 +1428,13 @@ async function drawTimeline(box){
     notes.length ? el('div',{class:'warnbar',style:'display:block;margin-top:8px'}, el('b',{},'⚠ Overlaps'), ...notes.map(n=>el('div',{class:'small'},n))) : el('div',{class:'mute small',style:'margin-top:6px'},'No overlaps in the next week. Block lengths come from how long each job took on its last runs; a dashed block has no finished run yet, so its length is a guess. Server clock: '+t.tz+'.'));
 }
 
+const CPU_OPTS = [['low','Low: 1 core, lowest priority (gentlest)'],['balanced','Balanced: 2 cores, lowest priority (default)'],['high','High: half the cores, medium priority'],['full','Full: every core, normal priority (can make the NAS unresponsive)']];
+function cpuSel(v){ const s = el('select',{style:'width:auto',title:'How much of the NAS processor compression may use. Compression ratio is the same at every setting; only the speed changes. If DSM, Jellyfin or pings get sluggish, pick a lower setting.'}, ...CPU_OPTS.map(o=>el('option',{value:o[0]},o[1]))); s.value = v || 'balanced'; return s; }
 async function viewQueue(){
   const m = $('#main'); let q; try{ q = await api('/api/cqueue'); }catch(e){ return toast(e.message); }
   const cfg = q.settings;
-  const en = el('input',{type:'checkbox',checked:cfg.enabled}), a = el('input',{type:'time',value:cfg.start,style:'width:auto'}), b = el('input',{type:'time',value:cfg.end,style:'width:auto'}), fc = el('input',{type:'checkbox',checked:cfg.full_cpu});
-  const save = async () => { try{ await api('/api/cqueue/settings',{enabled:en.checked,start:a.value,end:b.value,full_cpu:fc.checked}); toast('Saved'); viewQueue(); }catch(e){ toast(e.message,6000) } };
+  const en = el('input',{type:'checkbox',checked:cfg.enabled}), a = el('input',{type:'time',value:cfg.start,style:'width:auto'}), b = el('input',{type:'time',value:cfg.end,style:'width:auto'}), fc = cpuSel(cfg.full_cpu);
+  const save = async () => { try{ await api('/api/cqueue/settings',{enabled:en.checked,start:a.value,end:b.value,full_cpu:fc.value}); toast('Saved'); viewQueue(); }catch(e){ toast(e.message,6000) } };
   const tot = q.summary.bytes + (q.items.filter(i=>i.state==='running').reduce((x,i)=>x+i.size,0));
   const estS = q.speed_bps ? tot/q.speed_bps : 0;
   const ck = new Set();
@@ -1421,7 +1448,7 @@ async function viewQueue(){
       el('p',{class:'mute small'}, 'Files you add from a Large files list wait here and are compressed one at a time inside the window below, so the NAS does the heavy work overnight. A file that is already running when the window closes is allowed to finish. The queue steps aside for a scheduled scan that is about to start, and Cancel pauses it.'),
       el('div',{class:'row',style:'gap:14px;flex-wrap:wrap;align-items:center'},
         el('label',{style:'display:flex;gap:6px;align-items:center;margin:0'}, en, 'Run the queue automatically between'), a, 'and', b,
-        el('label',{style:'display:flex;gap:6px;align-items:center;margin:0',title:'Uses every processor core at normal priority while the window is open. Recommended overnight.'}, fc, 'Use full CPU in the window'),
+        el('label',{style:'display:flex;gap:6px;align-items:center;margin:0'}, 'CPU use in the window', fc),
         el('button',{class:'btn primary',style:'flex:none',onclick:save},'Save')),
       el('div',{class:'mute small',style:'margin-top:8px'}, cfg.enabled ? (q.in_window ? 'The window is open now.' : 'Next window opens '+fmtWhen(q.next_window)+'.') : 'The night window is off, so nothing runs by itself. You can still use “Run the queue now”.', ` Server clock: ${q.tz}.`)),
     el('div',{class:'card'}, el('h2',{},`Waiting (${q.summary.waiting})`),
@@ -1437,13 +1464,21 @@ async function viewQueue(){
   clearInterval(S.qpoll); S.qpoll = setInterval(()=>{ if(S.tab!=='queue'){ clearInterval(S.qpoll); return; } if(!document.querySelector('.modal')) viewQueue(); }, 15000);
 }
 
+function resultText(p, s){
+  const n = x => (x||0).toLocaleString(), g = s.groups||0;
+  if(p.family==='folders') return g ? `${n(g)} empty folder${g==1?'':'s'}`+(s.removed?`, ${n(s.removed)} removed`:'') : 'no empty folders';
+  if(p.family==='health') return g ? `${n(g)} suspect video${g==1?'':'s'}` : 'no suspect videos';
+  if(p.family==='large') return `${n(g)} large file${g==1?'':'s'} listed`;
+  return g ? `${n(g)} duplicate group${g==1?'':'s'}` : 'no duplicates';
+}
+
 async function viewJobs(){
   const d = await api('/api/jobs'); const m = $('#main');
   const tb = el('tbody');
   d.jobs.forEach(j => {
     const last = j.last, p = j.params;
     const lastCell = last ? el('td',{}, el('span',{class:'pill '+(last.status==='done'?'ok':last.status==='error'?'bad':'warn')}, last.status),
-        el('span',{class:'sub'}, (last.finished?fmtDate(last.finished):'')+(last.status==='done'?(p.family==='folders'?` · ${last.stats.groups} empty folders`+(last.stats.removed?`, ${last.stats.removed} removed`:''):(p.family==='health'?` · ${last.stats.groups} suspect videos`:` · ${last.stats.groups} groups`)):'')),
+        el('span',{class:'sub'}, (last.finished?fmtDate(last.finished):'')+(last.status==='done'?' · '+resultText(p,last.stats):'')),
         last.message ? el('span',{class:'sub',title:last.message}, last.message.slice(0,60)) : '',
         (last.status==='done' && last.finished && last.started) ? el('span',{class:'sub'}, 'Took '+fmtLen(last.finished-last.started)+(j.durations && j.durations.recent.length>1 ? ` · usually ${fmtLen(j.durations.avg)} · longest ${fmtLen(j.durations.max)}`:'')) : '',
         last.status==='done' ? el('button',{class:'btn sm',style:'margin-top:4px'+((p.family==='folders'&&p.auto_remove)?';opacity:.6':''),title:(p.family==='folders'&&p.auto_remove)?'Auto-delete job: the folders were already removed, so this list is normally empty':'',onclick:()=>{S.scanId=last.id;store.set('scanId',last.id);go('results')}},'Open results') : '')

@@ -276,13 +276,30 @@ def sevenzip_exe():
     return None
 
 
+CPU_MODES = {
+    "low": (19, lambda n: 1, 0.5),                        # lowest priority, 1 core
+    "balanced": (19, lambda n: 2, 1.0),                   # lowest priority, 2 cores (default)
+    "high": (10, lambda n: max(2, n // 2), 1.5),          # a bit higher priority, half the cores
+    "full": (0, lambda n: n, 2.0),                        # normal priority, every core
+}
+
+
+def cpu_mode(v):
+    """Accepts a mode name (or an old True/False full-CPU flag) and returns a valid mode name."""
+    if v is True:
+        return "full"
+    if isinstance(v, str) and v in CPU_MODES:
+        return v
+    return "balanced"
+
+
 def _run_archiver(cmd, cwd, cancel, on_pct=None, low=True):
     """Run a command at low priority; poll so a Cancel can stop it. on_pct(0-100) is called as the archiver reports progress.
     Returns (returncode, last output line)."""
     import re
     import subprocess
     import threading
-    proc = subprocess.Popen((["nice", "-n", "19"] if low else []) + cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    proc = subprocess.Popen((["nice", "-n", str(low)] if low not in (False, None, 0) else []) + cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     buf = []
 
     def reader():
@@ -332,14 +349,14 @@ def compress_file(path, size, fmt, level, cancel, progress=None, full_cpu=False)
             kind = "7z" if fmt == "7z" else "zip"
             if progress:
                 progress("compressing", None)
-            rc, last = _run_archiver([exe, "a", "-t" + kind, "-mx=" + mx, "-mmt=" + (str(os.cpu_count() or 2) if full_cpu else "2"), "-y", "-bsp1", "-bso0", tmp, "./" + name], d, cancel,
-                                     (lambda pc: progress("compressing", pc)) if progress else None, low=not full_cpu)
+            rc, last = _run_archiver([exe, "a", "-t" + kind, "-mx=" + mx, "-mmt=" + str(CPU_MODES[cpu_mode(full_cpu)][1](os.cpu_count() or 2)), "-y", "-bsp1", "-bso0", tmp, "./" + name], d, cancel,
+                                     (lambda pc: progress("compressing", pc)) if progress else None, low=CPU_MODES[cpu_mode(full_cpu)][0])
             if rc != 0:
                 raise ValueError("the archiver failed: " + (last or f"exit {rc}"))
             if progress:
                 progress("testing", 0)
             rc, last = _run_archiver([exe, "t", "-t" + kind, "-bsp1", "-bso0", tmp], d, cancel,
-                                     (lambda pc: progress("testing", pc)) if progress else None, low=not full_cpu)
+                                     (lambda pc: progress("testing", pc)) if progress else None, low=CPU_MODES[cpu_mode(full_cpu)][0])
             if rc != 0:
                 raise ValueError("the finished archive did not pass its test: " + (last or f"exit {rc}"))
         else:                                                   # zip without 7z installed: plain Python
